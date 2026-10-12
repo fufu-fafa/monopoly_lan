@@ -212,7 +212,8 @@ h3 { margin: 16px 0 8px; font-size: 1rem; }
 .players li.current { background: rgba(27, 127, 59, 0.1); }
 .players li.out { opacity: 0.5; }
 .player-head { display: flex; justify-content: space-between; }
-.chips { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px; }
+.chips { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
+.chip-row { display: flex; flex-wrap: wrap; gap: 3px; }
 .chip { display: inline-block; width: 14px; height: 14px; border-radius: 3px; border: 1px solid rgba(0,0,0,.25); flex-shrink: 0; }
 .chip.mortgaged { opacity: 0.35; }
 .manage { list-style: none; margin: 0; padding: 0; }

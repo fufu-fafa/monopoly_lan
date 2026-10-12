@@ -314,18 +314,35 @@ function Players({ state, presence, me, isAdmin, onRemove }: {
                 Remove from game
               </button>
             )}
+            {/* One row per colour set, then railroads and utilities on rows of their own. */}
             <div className="chips">
-              {ownedProperties(state, id).map((i) => {
-                const sp = BOARD[i];
-                const bg = sp.kind === 'street' ? GROUP_COLORS[sp.group] : '#555';
-                return <span key={i} className={`chip ${state.properties[i].mortgaged ? 'mortgaged' : ''}`} style={{ background: bg }} title={sp.name} />;
-              })}
+              {chipRows(ownedProperties(state, id)).map((row) => (
+                <div key={row[0]} className="chip-row">
+                  {row.map((i) => {
+                    const sp = BOARD[i];
+                    const bg = sp.kind === 'street' ? GROUP_COLORS[sp.group] : sp.kind === 'railroad' ? '#333' : '#8a8a8a';
+                    return <span key={i} className={`chip ${state.properties[i].mortgaged ? 'mortgaged' : ''}`} style={{ background: bg }} title={sp.name} />;
+                  })}
+                </div>
+              ))}
             </div>
           </li>
         );
       })}
     </ul>
   );
+}
+
+/** Groups owned property indices by set (colour group, railroads, utilities), in board order. */
+function chipRows(owned: number[]): number[][] {
+  const rows = new Map<string, number[]>();
+  for (const i of [...owned].sort((a, b) => a - b)) {
+    const sp = BOARD[i];
+    const key = sp.kind === 'street' ? `street-${sp.group}` : sp.kind;
+    rows.set(key, [...(rows.get(key) ?? []), i]);
+  }
+  const streets = [...rows].filter(([k]) => k.startsWith('street-')).map(([, v]) => v);
+  return [...streets, rows.get('railroad'), rows.get('utility')].filter((r): r is number[] => !!r);
 }
 
 function Manage({ state, me, act, onSpace }: { state: GameState; me: Player; act: (a: Action) => void; onSpace: (i: number) => void }) {
