@@ -39,10 +39,6 @@ function readSpeed(): Speed {
   }
 }
 
-const reducedMotion = () => {
-  try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; }
-};
-
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
@@ -116,7 +112,9 @@ export function useAnimator(apply: (msg: StateMsg) => void, showCard: (c: CardSh
       const prev = shown.current;
       const catchUp = queue.current.length >= 3;
       const moving = msg.events.some((e) => e.type === 'diceRolled' || e.type === 'moved');
-      if (prev && moving && !catchUp && !reducedMotion()) {
+      // Step-by-step movement still plays with the OS "reduce motion" setting on (macOS and
+      // iOS users often have it on); only the bounce effects are turned off, in style.css.
+      if (prev && moving && !catchUp) {
         await animate(prev, msg.events, gen);
       } else {
         const drawn = msg.events.filter((e) => e.type === 'cardDrawn').pop();

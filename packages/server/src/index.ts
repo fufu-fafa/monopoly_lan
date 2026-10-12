@@ -52,7 +52,10 @@ const server = http.createServer(async (req, res) => {
   if (!file.startsWith(clientDir) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
     file = path.join(clientDir, 'index.html');
   }
-  res.writeHead(200, { 'content-type': MIME[path.extname(file)] ?? 'application/octet-stream' });
+  // index.html must never be cached, or a browser keeps running an old build after an update.
+  // Built assets have content hashes in their names, so they can be cached for good.
+  const cache = file.includes(`${path.sep}assets${path.sep}`) ? 'public, max-age=31536000, immutable' : 'no-cache';
+  res.writeHead(200, { 'content-type': MIME[path.extname(file)] ?? 'application/octet-stream', 'cache-control': cache });
   fs.createReadStream(file).pipe(res);
 });
 
