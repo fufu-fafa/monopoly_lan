@@ -15,7 +15,7 @@ const BOT_NAMES = ['Ada', 'Turing', 'Hopper', 'Babbage', 'Lovelace', 'Knuth', 'S
 const TOKENS = ['🎩', '🚗', '🐕', '🚢', '👢', '🐈', '🦖', '🦆'];
 const COLORS = ['#e53935', '#1e88e5', '#43a047', '#fb8c00', '#8e24aa', '#00acc1', '#6d4c41', '#d81b60'];
 
-export interface Seat { playerId: string; name: string; token: string; color: string; seatToken: string; bot?: boolean; watching?: boolean }
+export interface Seat { playerId: string; name: string; token: string; color: string; seatToken: string; bot?: boolean; advanced?: boolean; watching?: boolean }
 export interface LobbyOptions { startingCash: number; freeParkingJackpot: boolean; shuffleOrder: boolean }
 
 export interface Client {
@@ -86,6 +86,7 @@ export class Room {
       case 'setWatching': return this.setWatching(client, msg.watching);
       case 'addBot': return this.addBot(client);
       case 'removeBot': return this.removeBot(client, msg.playerId);
+      case 'setBotLevel': return this.setBotLevel(client, msg.playerId, msg.advanced);
       case 'setOptions': return this.setOptions(client, msg.options);
       case 'startGame': return this.startGame(client);
       case 'endGame': return this.endGame(client);
@@ -176,7 +177,7 @@ export class Room {
     const name = this.freeChoice(BOT_NAMES.map((n) => `${n} (bot)`), (s) => s.name);
     const token = this.freeChoice(TOKENS, (s) => s.token);
     const color = this.freeChoice(COLORS, (s) => s.color);
-    this.seats.push({ playerId: `p${this.nextPlayer++}`, name, token, color, seatToken: randomUUID(), bot: true });
+    this.seats.push({ playerId: `p${this.nextPlayer++}`, name, token, color, seatToken: randomUUID(), bot: true, advanced: true });
     this.broadcastLobby();
   }
 
@@ -184,6 +185,16 @@ export class Room {
     if (this.game) return client.send({ type: 'error', message: 'The game has already started' });
     if (!client.playerId || client.playerId !== this.adminId) return client.send({ type: 'error', message: 'Only the room admin can remove computer players' });
     this.seats = this.seats.filter((s) => !(s.bot && s.playerId === playerId));
+    this.broadcastLobby();
+  }
+
+  /** Advanced bots play every strategy; basic ones skip the newer tricks (see strategy.ts). */
+  private setBotLevel(client: Client, playerId: unknown, advanced: unknown) {
+    if (this.game) return client.send({ type: 'error', message: 'The game has already started' });
+    if (!client.playerId || client.playerId !== this.adminId) return client.send({ type: 'error', message: 'Only the room admin can change computer players' });
+    const seat = this.seats.find((s) => s.bot && s.playerId === playerId);
+    if (!seat || typeof advanced !== 'boolean') return;
+    seat.advanced = advanced;
     this.broadcastLobby();
   }
 
@@ -280,7 +291,7 @@ export class Room {
     const s = this.game.state;
     for (const seat of this.seats) {
       if (!seat.bot || getPlayer(s, seat.playerId)?.bankrupt !== false) continue;
-      if (!this.botMemory.has(seat.playerId)) this.botMemory.set(seat.playerId, newBotMemory());
+      if (!this.botMemory.has(seat.playerId)) this.botMemory.set(seat.playerId, newBotMemory({ advanced: seat.advanced !== false }));
       const action = strategyBotAction(s, seat.playerId, this.botMemory.get(seat.playerId));
       if (!action) continue;
       const seq = () => this.game!.actions.length + 1;

@@ -15,19 +15,29 @@ import type { Action, Assets, ColorGroup, GameState, PlayerId, TradeOffer } from
  * - trade to complete sets, never hand over a monopoly without equal value back,
  *   and buy strays that block an opponent's set;
  * - leave jail fast early, stay in jail once the board is developed;
- * - keep a cash cushion sized to the worst rent on the board.
+ * - keep a cash cushion sized to the worst rent on the board;
+ * - when one player controls most of the board, everyone else goes all in against them,
+ *   and no bot makes a trade that would hand its partner control of the board.
  * Each call returns one action (or null when there is nothing to do); the caller loops.
+ *
+ * A basic bot (`advanced: false`) plays the same, except that it ignores who controls the board:
+ * it never goes all in against a leader and does not refuse trades over board control.
  */
 
 export interface BotMemory {
+  advanced: boolean;
   proposed: Set<string>; // trades already offered, so a bot never repeats itself
   lastTradeTurn: number;
   tradeSeen: Map<string, number>; // own open offers -> turn first seen
 }
 
-export function newBotMemory(): BotMemory {
-  return { proposed: new Set(), lastTradeTurn: -1, tradeSeen: new Map() };
+export function newBotMemory(opts: { advanced?: boolean } = {}): BotMemory {
+  return { advanced: opts.advanced ?? true, proposed: new Set(), lastTradeTurn: -1, tradeSeen: new Map() };
 }
+
+// The level of the bot whose move is being worked out. strategyBotAction sets it for the length of
+// one synchronous call, so every valuation below sees the same level without threading it through.
+let advanced = true;
 
 const GROUPS: ColorGroup[] = ['orange', 'red', 'yellow', 'pink', 'lightBlue', 'green', 'darkBlue', 'brown'];
 // How much a complete set is worth relative to its list price.
@@ -64,7 +74,7 @@ function setMultiplier(owners: Owners, pid: PlayerId, g: ColorGroup): number {
 }
 
 /** What a player's property is worth to them under a (possibly hypothetical) ownership map. */
-function holdingsValue(s: GameState, owners: Owners, pid: PlayerId): number {
+function holdingsValue(s: GameState, owners: Owners, pid: PlayerId, countMortgages = true): number {
   let v = 0;
   let rails = 0;
   let utils = 0;
@@ -73,7 +83,7 @@ function holdingsValue(s: GameState, owners: Owners, pid: PlayerId): number {
     const i = Number(k);
     const sp = propertySpace(i)!;
     const prop = s.properties[i];
-    if (prop.mortgaged) v -= Math.ceil(sp.mortgage * (1 + s.rules.mortgageInterest));
+    if (prop.mortgaged && countMortgages) v -= Math.ceil(sp.mortgage * (1 + s.rules.mortgageInterest));
     if (sp.kind !== 'street') {
       if (sp.kind === 'railroad') rails++;
       else utils++;
@@ -84,8 +94,46 @@ function holdingsValue(s: GameState, owners: Owners, pid: PlayerId): number {
   return v + RAIL_VALUE[rails] + UTIL_VALUE[utils];
 }
 
-/** Value to `pid` of gaining property `i`, plus half of what it denies the opponent who wants it most. */
+// ------------------------------------------------------------------ board control
+
+/**
+ * A player controls the board when they own at least 10 of the 28 deeds and more than half the
+ * value of all owned property (sets, houses and railroads count for more than their price).
+ */
+function controlsBoard(s: GameState, owners: Owners, pid: PlayerId): boolean {
+  if (Object.values(owners).filter((o) => o === pid).length < 10) return false;
+  let mine = 0;
+  let total = 0;
+  for (const p of activePlayers(s)) {
+    // Mortgages are ignored so that raising cash never flips who leads.
+    const v = holdingsValue(s, owners, p.id, false);
+    total += v;
+    if (p.id === pid) mine = v;
+  }
+  return mine > total * 0.5;
+}
+
+/** The player who controls most of the board right now, if any. */
+const leaderCache = new WeakMap<GameState, PlayerId | null>();
+export function boardLeader(s: GameState): PlayerId | null {
+  // A state is never changed once applyAction returns it, so the answer can be kept per state.
+  if (leaderCache.has(s)) return leaderCache.get(s)!;
+  const owners = ownersOf(s);
+  const leader = activePlayers(s).find((p) => controlsBoard(s, owners, p.id))?.id ?? null;
+  leaderCache.set(s, leader);
+  return leader;
+}
+
+/** Someone else controls the board: stop playing safe, spend everything and gang up on them. */
+function allIn(s: GameState, me: PlayerId): boolean {
+  if (!advanced) return false;
+  const leader = boardLeader(s);
+  return !!leader && leader !== me;
+}
+
+/** Value to `pid` of gaining property `i`, plus what it denies the opponent who wants it most (all of it against a board leader). */
 function propertyWorth(s: GameState, pid: PlayerId, i: number): { mine: number; block: number } {
+  const leader = advanced ? boardLeader(s) : null;
   const owners = ownersOf(s);
   const without = { ...owners, [i]: null };
   const mine = holdingsValue(s, { ...without, [i]: pid }, pid) - holdingsValue(s, without, pid);
@@ -94,7 +142,7 @@ function propertyWorth(s: GameState, pid: PlayerId, i: number): { mine: number; 
   for (const o of activePlayers(s)) {
     if (o.id === pid) continue;
     const theirs = holdingsValue(s, { ...without, [i]: o.id }, o.id) - holdingsValue(s, without, o.id);
-    block = Math.max(block, (theirs - price) * 0.5);
+    block = Math.max(block, (theirs - price) * (o.id === leader ? 1 : 0.5));
   }
   return { mine, block };
 }
@@ -110,6 +158,7 @@ function opponentRents(s: GameState, me: PlayerId): number[] {
 
 /** Cash to keep on hand: enough to survive a bad landing without breaking up a developed set. */
 function cushion(s: GameState, me: PlayerId): number {
+  if (allIn(s, me)) return 0;
   const r = opponentRents(s, me);
   return Math.min(900, Math.max(60, Math.round((r[0] ?? 0) * 0.6 + (r[1] ?? 0) * 0.2)));
 }
@@ -153,6 +202,15 @@ const groupRank = (g: ColorGroup) => GROUPS.indexOf(g);
 // ------------------------------------------------------------------ entry point
 
 export function strategyBotAction(s: GameState, me: PlayerId, mem: BotMemory = newBotMemory()): Action | null {
+  advanced = mem.advanced;
+  try {
+    return decide(s, me, mem);
+  } finally {
+    advanced = true;
+  }
+}
+
+function decide(s: GameState, me: PlayerId, mem: BotMemory): Action | null {
   const p = getPlayer(s, me);
   if (!p || p.bankrupt || s.winner) return null;
   const legal = legalActions(s, me);
@@ -181,7 +239,7 @@ export function strategyBotAction(s: GameState, me: PlayerId, mem: BotMemory = n
     if (s.turn.number - mem.tradeSeen.get(t.id)! >= activePlayers(s).length) return { type: 'WITHDRAW_TRADE', tradeId: t.id };
   }
 
-  const manage = unmortgageAction(s, me, legal) ?? buildAction(s, me, legal);
+  const manage = unmortgageAction(s, me, legal) ?? buildAction(s, me, legal) ?? fundBuildingAction(s, me, legal);
   if (manage) return manage;
 
   if (s.turn.phase === 'preRoll') {
@@ -235,7 +293,8 @@ function buildAction(s: GameState, me: PlayerId, legal: Action[]): Action | null
   const spare = spareMortgage(s, me) * 0.5;
   const reserve = cushion(s, me);
   // Never trade four houses for a hotel while an opponent has a set that needs houses.
-  const opponentSet = activePlayers(s).some((o) => o.id !== me && GROUPS.some((g) => ownsFullSet(s, o.id, g)));
+  // All in, the highest rent matters more than starving anyone of houses.
+  const opponentSet = !allIn(s, me) && activePlayers(s).some((o) => o.id !== me && GROUPS.some((g) => ownsFullSet(s, o.id, g)));
 
   const options = builds.map((a) => {
     const sp = propertySpace(a.space)!;
@@ -255,11 +314,13 @@ function buildAction(s: GameState, me: PlayerId, legal: Action[]): Action | null
 function unmortgageAction(s: GameState, me: PlayerId, legal: Action[]): Action | null {
   const cash = getPlayer(s, me)!.cash;
   const reserve = cushion(s, me);
+  const goingAllIn = allIn(s, me);
   const options = legal
     .filter((a): a is SpaceAction => a.type === 'UNMORTGAGE')
     .map((a) => {
       const sp = propertySpace(a.space)!;
       const inSet = sp.kind === 'street' && ownsFullSet(s, me, sp.group);
+      if (goingAllIn && !inSet) return null; // that cash goes into houses instead
       // Freeing a set to build on is worth a thinner cushion than freeing a stray.
       const need = inSet ? reserve : reserve * 1.5 + 100;
       if (cash - unmortgageCost(s, a.space) < need) return null;
@@ -269,6 +330,28 @@ function unmortgageAction(s: GameState, me: PlayerId, legal: Action[]): Action |
     .filter((x): x is { a: SpaceAction; rank: number } => !!x)
     .sort((x, y) => x.rank - y.rank);
   return options[0]?.a ?? null;
+}
+
+/** All in: mortgage loose property to pay for houses on a set that could take more. */
+function fundBuildingAction(s: GameState, me: PlayerId, legal: Action[]): Action | null {
+  if (!allIn(s, me) || s.bank.houses < 1 || debtsOf(s, me).length) return null;
+  const cash = getPlayer(s, me)!.cash;
+  const wantsHouse = ownedProperties(s, me).some((i) => {
+    const sp = propertySpace(i)!;
+    if (sp.kind !== 'street' || !ownsFullSet(s, me, sp.group) || sp.houseCost <= cash) return false;
+    const group = groupSpaces(sp.group);
+    return group.every((g) => !s.properties[g].mortgaged) && s.properties[i].buildings < 4;
+  });
+  if (!wantsHouse) return null;
+  const rank = (i: number) => {
+    const sp = propertySpace(i)!;
+    if (sp.kind !== 'street') return sp.kind === 'utility' ? 0 : 2;
+    return ownsFullSet(s, me, sp.group) ? 9 : 1;
+  };
+  const loose = legal
+    .filter((a): a is SpaceAction => a.type === 'MORTGAGE' && rank(a.space) < 9)
+    .sort((x, y) => rank(x.space) - rank(y.space));
+  return loose[0] ?? null;
 }
 
 function raiseMoney(s: GameState, me: PlayerId, legal: Action[]): Action | null {
@@ -344,11 +427,33 @@ function tradeGains(s: GameState, from: PlayerId, to: PlayerId, give: Assets, ge
   };
 }
 
-const acceptable = (mine: number, theirs: number) => mine > 0 && mine >= theirs * 0.85 - 10;
+/** Whether `me` takes a trade with `partner` that gains `mine` and gives the partner `theirs`. */
+function acceptable(s: GameState, me: PlayerId, partner: PlayerId, give: Assets, get: Assets, mine: number, theirs: number): boolean {
+  if (mine <= 0) return false;
+  const after = ownersOf(s);
+  for (const i of give.properties) after[i] = partner;
+  for (const i of get.properties) after[i] = me;
+  if (!advanced) return mine >= theirs * 0.85 - 10;
+  const leader = boardLeader(s);
+  if (leader === partner) {
+    // Trading with the leader only to break their hold, or for a set of my own worth at least what they get.
+    if (!controlsBoard(s, after, partner)) return mine >= theirs * 0.85 - 10;
+    const completesSet = get.properties.some((i) => {
+      const sp = propertySpace(i)!;
+      return sp.kind === 'street' && groupSpaces(sp.group).every((g) => after[g] === me);
+    });
+    return completesSet && mine >= theirs;
+  }
+  // Never hand anyone control of most of the board.
+  if (controlsBoard(s, after, partner)) return false;
+  // Against a leader, any deal that helps another challenger is worth making.
+  if (leader && leader !== me) return true;
+  return mine >= theirs * 0.85 - 10;
+}
 
 function wouldAccept(s: GameState, t: TradeOffer): boolean {
   const g = tradeGains(s, t.from, t.to, t.give, t.get);
-  return acceptable(g.to, g.from);
+  return acceptable(s, t.to, t.from, t.get, t.give, g.to, g.from);
 }
 
 interface Deal { other: PlayerId; giveProps: number[]; getProps: number[]; giveCards: string[]; getCards: string[]; min: number }
@@ -386,7 +491,7 @@ function tradeAction(s: GameState, me: PlayerId, mem: BotMemory): Action | null 
         if (tradable(i)) gives.push([i]);
       }
       for (const give of gives) {
-        const min = have + get.length === gs.length ? 40 : 25; // a step towards a set is worth doing for less
+        const min = have + get.length === gs.length ? 40 : 25; // a step towards a set is worth doing for less // a step towards a set is worth doing for less
         deals.push({ other, giveProps: give, getProps: get, giveCards: [], getCards: [], min });
         // Jail cards as sweeteners either way.
         if (meP.jailCards.length) deals.push({ other, giveProps: give, getProps: get, giveCards: [meP.jailCards[0]], getCards: [], min });
@@ -419,7 +524,10 @@ function tradeAction(s: GameState, me: PlayerId, mem: BotMemory): Action | null 
     const getA = assets(getCash, d.getProps, d.getCards);
     if (whyAssetsInvalid(s, me, giveA) || whyAssetsInvalid(s, d.other, getA)) continue;
     const gains = tradeGains(s, me, d.other, giveA, getA);
-    if (gains.from < d.min || !acceptable(gains.to, gains.from)) continue;
+    if (gains.from < d.min) continue;
+    // Only offers both sides would take: I check mine, and judge theirs by the same rules.
+    if (!acceptable(s, me, d.other, giveA, getA, gains.from, gains.to)) continue;
+    if (!acceptable(s, d.other, me, getA, giveA, gains.to, gains.from)) continue;
     const key = `${d.other}|${[...d.giveProps].sort()}|${[...d.getProps].sort()}|${d.giveCards.length}|${d.getCards.length}|${giveCash}|${getCash}`;
     if (mem.proposed.has(key)) continue;
     if (!best || gains.from > best.gain) best = { offer: { to: d.other, give: giveA, get: getA }, gain: gains.from, key };

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { activePlayers, applyAction, CARDS, groupSpaces, randomBotAction, strategyBotAction, newBotMemory, waitingOn, type BotMemory, type GameState } from '../src';
+import { activePlayers, applyAction, boardLeader, CARDS, groupSpaces, randomBotAction, strategyBotAction, newBotMemory, waitingOn, type BotMemory, type GameState } from '../src';
 import { checkInvariants, mulberry, newGame } from './helpers';
 
 /** Plays a game where players listed in `smart` use the strategy bot and the rest the random bot. */
@@ -138,5 +138,113 @@ describe('strategy bot', () => {
       });
       expect(strategyBotAction(s, 'p2', newBotMemory())?.type).toBe(accept ? 'ACCEPT_TRADE' : 'REJECT_TRADE');
     }
+  });
+
+  describe('when one player controls most of the board', () => {
+    const orange = groupSpaces('orange');
+    // p2 holds most of the board, including the full green set.
+    const bigP2 = (s: GameState) => {
+      for (const g of ['lightBlue', 'pink', 'red', 'yellow', 'green'] as const) for (const i of groupSpaces(g)) s.properties[i].ownerId = 'p2';
+    };
+    const withOrange = (houses: number, cash: number) => (s: GameState) => {
+      for (const i of orange) s.properties[i] = { ownerId: 'p1', buildings: houses, mortgaged: false };
+      s.bank.houses -= houses * 3;
+      s.players.find((p) => p.id === 'p1')!.cash = cash;
+    };
+
+    it('recognises the leader', () => {
+      expect(boardLeader(setup({}, bigP2))).toBe('p2');
+      expect(boardLeader(setup({}, withOrange(0, 1500)))).toBeNull();
+    });
+
+    it('goes all in: hotels and every last dollar into houses', () => {
+      // Normally it holds at four houses while an opponent has a set.
+      const calm = setup({ [groupSpaces('green')[0]]: 'p2', [groupSpaces('green')[1]]: 'p2', [groupSpaces('green')[2]]: 'p2' }, withOrange(4, 1000));
+      expect(strategyBotAction(calm, 'p1', newBotMemory())?.type).toBe('ROLL_DICE');
+      const s = setup({}, (s) => { bigP2(s); withOrange(4, 1000)(s); });
+      expect(strategyBotAction(s, 'p1', newBotMemory())?.type).toBe('BUILD');
+      // And spends down to almost nothing, where it would normally keep a cushion.
+      const poor = setup({}, (s) => { bigP2(s); withOrange(1, 110)(s); });
+      expect(strategyBotAction(poor, 'p1', newBotMemory())?.type).toBe('BUILD');
+    });
+
+    it('mortgages loose property to pay for houses', () => {
+      const s = setup({ 39: 'p1', 28: 'p1' }, (s) => { bigP2(s); withOrange(2, 20)(s); });
+      const a = strategyBotAction(s, 'p1', newBotMemory());
+      expect(a?.type).toBe('MORTGAGE');
+      expect(a && 'space' in a && [39, 28]).toContain(a && 'space' in a ? a.space : -1);
+    });
+
+    it('refuses a trade that only helps the leader', () => {
+      const s = setup({ 39: 'p1', 37: 'p2' }, (s) => {
+        bigP2(s);
+        s.trades.push({ id: 't1', from: 'p2', to: 'p1', give: { cash: 600, properties: [], jailCards: [] }, get: { cash: 0, properties: [39], jailCards: [] } });
+      });
+      expect(strategyBotAction(s, 'p1', newBotMemory())?.type).toBe('REJECT_TRADE');
+    });
+
+    it('refuses a rich offer that would hand the buyer control of the board', () => {
+      const s = setup({}, (s) => {
+        for (const g of ['lightBlue', 'pink', 'red'] as const) for (const i of groupSpaces(g)) s.properties[i].ownerId = 'p3';
+        for (const i of groupSpaces('yellow').slice(0, 2)) s.properties[i].ownerId = 'p3';
+        s.properties[groupSpaces('yellow')[2]].ownerId = 'p1';
+        for (const i of [5, 15, 25, 35, ...groupSpaces('green'), ...groupSpaces('darkBlue')]) s.properties[i].ownerId = 'p2';
+        s.players.find((p) => p.id === 'p3')!.cash = 3000;
+      });
+      expect(boardLeader(s)).toBeNull();
+      const offer = (cash: number) => ({ id: 't1', from: 'p3', to: 'p1', give: { cash, properties: [], jailCards: [] }, get: { cash: 0, properties: [groupSpaces('yellow')[2]], jailCards: [] } });
+      s.trades.push(offer(2500));
+      expect(strategyBotAction(s, 'p1', newBotMemory())?.type).toBe('REJECT_TRADE');
+    });
+  });
+
+  describe('basic bots', () => {
+    const basic = () => newBotMemory({ advanced: false });
+    const [stJames, tennessee] = groupSpaces('orange');
+
+    it('trade one piece at a time and trade jail cards like advanced bots', () => {
+      const piece = setup({ [stJames]: 'p1', [tennessee]: 'p2' });
+      expect(strategyBotAction(piece, 'p1', basic())).toEqual(strategyBotAction(piece, 'p1', newBotMemory()));
+      const card = setup({}, (s) => {
+        const id = giveCard(s, 'p2');
+        s.trades.push({ id: 't1', from: 'p1', to: 'p2', give: { cash: 60, properties: [], jailCards: [] }, get: { cash: 0, properties: [], jailCards: [id] } });
+      });
+      expect(strategyBotAction(card, 'p2', basic())?.type).toBe('ACCEPT_TRADE');
+    });
+
+    it('do not go all in against a board leader', () => {
+      const s = setup({}, (s) => {
+        for (const g of ['lightBlue', 'pink', 'red', 'yellow', 'green'] as const) for (const i of groupSpaces(g)) s.properties[i].ownerId = 'p2';
+        for (const i of groupSpaces('orange')) s.properties[i] = { ownerId: 'p1', buildings: 4, mortgaged: false };
+        s.bank.houses -= 12;
+      });
+      expect(strategyBotAction(s, 'p1', basic())?.type).toBe('ROLL_DICE');
+    });
+
+    it('a mixed table of basic and advanced bots plays to the end', () => {
+      for (let seed = 1; seed <= 10; seed++) {
+        let s = newGame(4, seed);
+        const mem = new Map(s.players.map((p, i) => [p.id, newBotMemory({ advanced: i % 2 === 0 })]));
+        for (let step = 0; step < 20000 && !s.winner; step++) {
+          let acted = false;
+          for (const id of [...new Set([...waitingOn(s), ...activePlayers(s).map((p) => p.id)])]) {
+            const a = strategyBotAction(s, id, mem.get(id));
+            if (!a) continue;
+            const r = applyAction(s, { action: a, by: id, seq: step });
+            if ('error' in r) throw new Error(r.error);
+            s = r.state;
+            acted = true;
+            break;
+          }
+          if (!acted) {
+            const r = applyAction(s, { action: { type: 'CLOSE_AUCTION' }, by: 'host', seq: step });
+            if ('error' in r) throw new Error('stuck');
+            s = r.state;
+          }
+          checkInvariants(s);
+        }
+        expect(s.winner).toBeTruthy();
+      }
+    });
   });
 });

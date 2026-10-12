@@ -91,6 +91,12 @@ await until(() => kp.lobby?.seats.length === 5, 2000, 'bots seated');
 const botSeats = kp.lobby.seats.filter((s: any) => s.bot);
 assert(botSeats.length === 4 && new Set(kp.lobby.seats.map((s: any) => s.token)).size === 5, 'bots get their own tokens');
 assert(botSeats.every((s: any) => kp.lobby.presence[s.playerId]), 'bots show as online');
+assert(botSeats.every((s: any) => s.advanced === true), 'bots start advanced');
+guest.send({ type: 'setBotLevel', playerId: botSeats[0].playerId, advanced: false });
+await wait(100);
+assert(guest.errors.includes('Only the room admin can change computer players'), 'only the admin changes bot level');
+kp.send({ type: 'setBotLevel', playerId: botSeats[0].playerId, advanced: false });
+await until(() => kp.lobby.seats.find((s: any) => s.playerId === botSeats[0].playerId)?.advanced === false, 2000, 'basic bot');
 kp.send({ type: 'removeBot', playerId: botSeats[3].playerId });
 await until(() => kp.lobby.seats.length === 4, 2000, 'bot removed');
 

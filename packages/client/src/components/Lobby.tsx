@@ -86,6 +86,12 @@ export function Lobby({ conn }: { conn: Connection }) {
               <span className="seat-name">{s.name}{s.playerId === me && ' (you)'}</span>
               {s.playerId === lobby.adminId && <span className="badge">admin</span>}
               {s.bot && <span className="badge off">computer</span>}
+              {s.bot && (isAdmin ? (
+                <label className="row">
+                  <input type="checkbox" checked={s.advanced !== false} onChange={(e) => send({ type: 'setBotLevel', playerId: s.playerId, advanced: e.target.checked })} />
+                  Advanced
+                </label>
+              ) : s.advanced === false && <span className="badge off">basic</span>)}
               {s.watching && <span className="badge off">watching</span>}
               {s.bot && isAdmin && <button className="link" onClick={() => send({ type: 'removeBot', playerId: s.playerId })}>Remove</button>}
               {!presence[s.playerId] && <span className="badge off">offline</span>}
