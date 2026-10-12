@@ -5,6 +5,7 @@ import {
   type Action, type Assets, type GameState, type Player, type TradeOffer,
 } from '@monopoly/engine';
 import type { Connection } from '../net';
+import type { Speed } from '../animator';
 import { Board } from './Board';
 import { TradeBuilder, describeAssets } from './Trade';
 
@@ -47,7 +48,7 @@ export function Game({ conn }: { conn: Connection }) {
   return (
     <div className="game">
       <div className="board-wrap">
-        <Board state={state} onSpace={setSelected} selected={selected}>
+        <Board state={state} onSpace={setSelected} selected={selected} positions={conn.anim.positions} hopping={conn.anim.hopping}>
           <Center conn={conn} me={meP}>{!narrow && <Controls conn={conn} legal={legal} me={meP} />}</Center>
         </Board>
       </div>
@@ -76,6 +77,14 @@ export function Game({ conn }: { conn: Connection }) {
           {tab === 'trades' && meP && <Trades state={state} me={meP} act={act} onNew={(t) => setTrade(t ?? {})} />}
           {tab === 'log' && <Log state={state} />}
         </div>
+        <label className="row small speed">
+          Game speed
+          <select value={conn.speed} onChange={(e) => conn.setSpeed(e.target.value as Speed)}>
+            <option value="slow">Slow</option>
+            <option value="normal">Normal</option>
+            <option value="fast">Fast</option>
+          </select>
+        </label>
         {meP && !meP.bankrupt && !state.winner && (
           <button className="link danger" onClick={() => confirm('Leave the game? Your property goes back to the bank and you cannot rejoin.') && act({ type: 'LEAVE_GAME' })}>
             Leave game
@@ -133,11 +142,7 @@ function Center({ conn, me, children }: { conn: Connection; me: Player | null; c
           {isAdmin && ' If they have left, remove them in the Players tab.'}
         </div>
       )}
-      {state.turn.lastRoll && (
-        <div className="dice" aria-label={`Dice ${state.turn.lastRoll.join(' and ')}`}>
-          {DIE[state.turn.lastRoll[0]]}{DIE[state.turn.lastRoll[1]]}
-        </div>
-      )}
+      <Dice values={conn.anim.dice?.values ?? state.turn.lastRoll} rolling={!!conn.anim.dice?.rolling} />
       {card && (
         <button className={`drawn-card ${card.deck}`} onClick={dismissCard}>
           <div className="deck-name">{card.deck === 'chance' ? 'Chance' : 'Community Chest'} · {name(card.playerId)}</div>
@@ -151,10 +156,29 @@ function Center({ conn, me, children }: { conn: Connection; me: Player | null; c
   );
 }
 
+function Dice({ values, rolling }: { values: [number, number] | null; rolling: boolean }) {
+  const [faces, setFaces] = useState<[number, number]>([1, 1]);
+  useEffect(() => {
+    if (!rolling) return;
+    const t = setInterval(() => setFaces([1 + Math.floor(Math.random() * 6), 1 + Math.floor(Math.random() * 6)]), 80);
+    return () => clearInterval(t);
+  }, [rolling]);
+  if (!values) return null;
+  const shown = rolling ? faces : values;
+  return (
+    <div className={`dice ${rolling ? 'rolling' : 'landed'}`} aria-label={rolling ? 'Rolling dice' : `Dice ${values.join(' and ')}`}>
+      <span className="die">{DIE[shown[0]]}</span>
+      <span className="die">{DIE[shown[1]]}</span>
+    </div>
+  );
+}
+
 function Controls({ conn, legal, me }: { conn: Connection; legal: Action[]; me: Player | null }) {
   const { state, act } = conn;
   const now = useNow();
   if (!state) return null;
+  // Buttons wait until the dice and tokens have finished moving.
+  if (conn.anim.busy) return <div className="action-bar"><span className="muted small">…</span></div>;
   return (
     <>
       {state.pending?.type === 'auction' && <AuctionPanel conn={conn} now={now} legal={legal} />}

@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Action, GameEvent, GameState } from '@monopoly/engine';
+import { useAnimator, type CardShown, type StateMsg } from './animator';
+
+export type { CardShown } from './animator';
 
 export interface SeatView { playerId: string; name: string; token: string; color: string }
 export interface LobbyOptions { startingCash: number; freeParkingJackpot: boolean; shuffleOrder: boolean }
@@ -12,7 +15,6 @@ export interface LobbyView {
 }
 
 export interface Toast { id: number; text: string; kind: 'error' | 'info' }
-export interface CardShown { text: string; deck: 'chance' | 'chest'; playerId: string; at: number }
 
 const SEAT_KEY = 'monopoly-lan-seat';
 
@@ -35,6 +37,17 @@ export function useConnection() {
   const toastId = useRef(1);
   const clientSeq = useRef(1);
 
+  // State updates go through the animator so dice and tokens move before the new state shows.
+  const applyState = useCallback((msg: StateMsg) => {
+    setState(msg.state);
+    setAuctionClosesAt(msg.auctionClosesAt);
+    setClockOffset(msg.serverNow - Date.now());
+    setLastEvents(msg.events);
+  }, []);
+  const anim = useAnimator(applyState, setCard);
+  const animRef = useRef(anim);
+  animRef.current = anim;
+
   const toast = useCallback((text: string, kind: Toast['kind'] = 'error') => {
     const id = toastId.current++;
     setToasts((t) => [...t.slice(-3), { id, text, kind }]);
@@ -53,6 +66,7 @@ export function useConnection() {
       sock.onopen = () => {
         retry = 500;
         setOnline(true);
+        animRef.current.reset(); // the host sends a fresh full state after hello
         sock.send(JSON.stringify({ type: 'hello', seatToken: storage()?.getItem(SEAT_KEY) ?? null }));
       };
       sock.onclose = () => {
@@ -70,20 +84,13 @@ export function useConnection() {
           case 'lobby':
             setLobby(msg);
             setPresence(msg.presence);
-            if (!msg.started) setState(null);
+            if (!msg.started) { animRef.current.reset(); setState(null); }
             break;
           case 'presence':
             setPresence(msg.presence);
             break;
           case 'state': {
-            setState(msg.state);
-            setAuctionClosesAt(msg.auctionClosesAt);
-            setClockOffset(msg.serverNow - Date.now());
-            setLastEvents(msg.events);
-            const drawn = (msg.events as GameEvent[]).filter((ev) => ev.type === 'cardDrawn').pop();
-            if (drawn && drawn.type === 'cardDrawn') {
-              setCard({ text: drawn.text, deck: drawn.cardId.startsWith('ch-') ? 'chance' : 'chest', playerId: drawn.playerId, at: Date.now() });
-            }
+            animRef.current.enqueue(msg);
             break;
           }
           case 'rejected':
@@ -112,6 +119,7 @@ export function useConnection() {
 
   return {
     online, me, lobby, state, presence, auctionClosesAt, clockOffset, toasts, lastEvents, card,
+    anim: anim.view, speed: anim.speed, setSpeed: anim.setSpeed,
     send, act, toast, dismissCard: () => setCard(null),
   };
 }

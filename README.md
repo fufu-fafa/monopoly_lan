@@ -16,6 +16,7 @@ The terminal prints the address to join (for example `http://192.168.1.20:3000`)
 
 - A browser that is not seated (for example a laptop on the TV) watches the board as a spectator.
 - If a phone locks or a page is refreshed, it reconnects and gets its seat back automatically.
+- Dice tumble and tokens walk space by space before the next move is allowed. Each device can pick Slow, Normal or Fast under **Game speed**.
 - If someone leaves for good, the admin can tap **Remove from game** next to them in the Players tab (their property goes back to the bank and is auctioned). A player can also tap **Leave game**.
 - If the host stops mid-game, `npm start` again resumes the unfinished game. Use `npm run serve -- --new` to skip resuming. Games are saved in `games/`.
 - Different port: `PORT=3001 npm start` (on Windows PowerShell: `$env:PORT=3001; npm start`).

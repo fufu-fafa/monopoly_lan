@@ -29,8 +29,10 @@ export function shortName(sp: SpaceDef): string {
     .replace('Community Chest', 'Chest');
 }
 
-export function Board({ state, onSpace, selected, children }: {
+export function Board({ state, onSpace, selected, children, positions, hopping }: {
   state: GameState;
+  positions?: Record<string, number> | null;
+  hopping?: string | null;
   onSpace: (i: number) => void;
   selected: number | null;
   children: ReactNode;
@@ -41,7 +43,7 @@ export function Board({ state, onSpace, selected, children }: {
       {BOARD.map((sp) => {
         const { row, col } = gridPos(sp.index);
         const prop = state.properties[sp.index];
-        const here = state.players.filter((p) => !p.bankrupt && p.position === sp.index);
+        const here = state.players.filter((p) => !p.bankrupt && (positions?.[p.id] ?? p.position) === sp.index);
         const owner = prop?.ownerId ? color(prop.ownerId) : undefined;
         return (
           <button
@@ -63,7 +65,7 @@ export function Board({ state, onSpace, selected, children }: {
             {here.length > 0 && (
               <div className="tokens">
                 {here.map((p) => (
-                  <span key={p.id} className={`token ${p.id === state.turn.playerId ? 'active' : ''}`} style={{ borderColor: p.color }} title={p.name}>
+                  <span key={p.id} className={`token ${p.id === hopping ? 'hop' : p.id === state.turn.playerId && !positions ? 'active' : ''}`} style={{ borderColor: p.color }} title={p.name}>
                     {p.token}
                   </span>
                 ))}

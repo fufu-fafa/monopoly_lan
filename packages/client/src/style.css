@@ -192,3 +192,22 @@ h3 { margin: 16px 0 8px; font-size: 1rem; }
   .space .icon { font-size: 11px; }
   .space-name { font-size: max(5.5px, 1.15cqw); }
 }
+
+/* ------------------------------------------------ animation */
+.dice { display: flex; gap: 1cqw; }
+.die { display: inline-block; }
+.dice.rolling .die { animation: tumble 0.25s linear infinite; }
+.dice.rolling .die:nth-child(2) { animation-duration: 0.3s; animation-direction: reverse; }
+.dice.landed .die { animation: land 0.35s ease-out; }
+@keyframes tumble {
+  0% { transform: translateY(0) rotate(0deg); }
+  50% { transform: translateY(-0.8cqw) rotate(180deg); }
+  100% { transform: translateY(0) rotate(360deg); }
+}
+@keyframes land { 0% { transform: scale(1.35); } 60% { transform: scale(0.92); } 100% { transform: scale(1); } }
+.token.hop { animation: hop 0.22s ease-out; z-index: 2; position: relative; }
+@keyframes hop { 0% { transform: translateY(-1.6cqw) scale(1.15); } 100% { transform: translateY(0) scale(1); } }
+.speed select { min-height: 32px; padding: 4px 8px; }
+@media (prefers-reduced-motion: reduce) {
+  .dice.rolling .die, .dice.landed .die, .token.hop { animation: none; }
+}
