@@ -74,53 +74,109 @@ h3 { margin: 16px 0 8px; font-size: 1rem; }
 }
 
 /* ------------------------------------------------ board */
+/* Classic board: mint spaces with black rules, colour bars facing the middle, and each
+   side's text facing its outer edge, so the top row reads upside down as on the real board.
+   Sizes are in cqw (percent of board width): a side space is about 8.1 wide by 13 deep. */
 .board {
+  --mint: #cde6d0;
+  --ink: #111;
+  --n: 8.05cqw;
+  --c: 12.5cqw;
   container-type: inline-size;
   width: min(100%, calc(100vh - 24px));
   aspect-ratio: 1;
   display: grid;
   grid-template-columns: 1.6fr repeat(9, 1fr) 1.6fr;
   grid-template-rows: 1.6fr repeat(9, 1fr) 1.6fr;
-  gap: 1px;
-  background: #445;
-  border: 2px solid #334;
-  border-radius: 6px;
+  gap: 0.18cqw;
+  background: var(--ink);
+  border: 0.5cqw solid var(--ink);
+  border-radius: 0.6cqw;
   overflow: hidden;
-  color: #1d2420;
+  color: var(--ink);
+  font-family: 'Arial Narrow', 'Helvetica Neue', Arial, sans-serif;
+  font-stretch: condensed;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.25);
 }
 @media (max-width: 900px) { .board { width: 100%; } }
 .space {
-  position: relative; background: var(--space); border: none; border-radius: 0; padding: 0; min-height: 0;
-  display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start;
-  font-size: 1.15cqw; line-height: 1.1; overflow: hidden; color: #1d2420; text-align: center;
+  position: relative; background: var(--mint); border: none; border-radius: 0; padding: 0; min-height: 0;
+  overflow: hidden; color: var(--ink); font-family: inherit; text-transform: uppercase;
 }
-.space.selected { outline: 3px solid #ffb300; outline-offset: -3px; z-index: 1; }
-.space.left { flex-direction: row-reverse; }
-.space.right { flex-direction: row; }
-.space.top { flex-direction: column-reverse; }
-.band { flex: 0 0 22%; display: flex; align-items: center; justify-content: center; gap: 0.3cqw; border-bottom: 1px solid #445; }
-.space.left .band, .space.right .band { flex-direction: column; border: none; }
-.space.left .band { border-left: 1px solid #445; }
-.space.right .band { border-right: 1px solid #445; }
-.space.top .band { border-bottom: none; border-top: 1px solid #445; }
-.house { width: 1cqw; height: 1cqw; background: #2e7d32; border: 1px solid #fff; }
-.hotel { width: 2.2cqw; height: 1.2cqw; background: #c62828; border: 1px solid #fff; }
-.space-name { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0.2cqw; font-weight: 600; }
-.space .icon { font-size: 2cqw; }
-.space.corner .space-name { font-size: 1.4cqw; }
-.space.corner .icon { font-size: 3.2cqw; }
-.price { font-size: 1.05cqw; color: #555; padding-bottom: 0.3cqw; }
-.space.left .price, .space.right .price { position: absolute; bottom: 0.2cqw; left: 0; right: 0; }
-.space.mortgaged { background: repeating-linear-gradient(45deg, #f2f2f2, #f2f2f2 6px, #dcdcdc 6px, #dcdcdc 12px); }
-.mort { position: absolute; top: 40%; left: 0; right: 0; font-size: 0.85cqw; font-weight: 700; color: var(--danger); }
-.tokens { position: absolute; inset: auto 0 0 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 0.2cqw; padding: 0.2cqw; }
-.token { font-size: 2.2cqw; line-height: 1; background: #fff; border: 0.35cqw solid; border-radius: 50%; width: 3.4cqw; height: 3.4cqw; display: grid; place-items: center; box-shadow: 0 1px 3px rgba(0,0,0,.4); }
+.space.selected { outline: 0.5cqw solid #ffb300; outline-offset: -0.5cqw; z-index: 1; }
+
+/* The printed face of a side space, drawn upright then turned to face its edge. */
+.face {
+  position: absolute; left: 50%; top: 50%; width: var(--n); height: var(--c);
+  display: flex; flex-direction: column; align-items: center; justify-content: space-between;
+  transform: translate(-50%, -50%);
+}
+.space.left .face { transform: translate(-50%, -50%) rotate(90deg); }
+.space.top .face { transform: translate(-50%, -50%) rotate(180deg); }
+.space.right .face { transform: translate(-50%, -50%) rotate(-90deg); }
+.band { flex: 0 0 21%; width: 100%; border-bottom: 0.18cqw solid var(--ink); display: flex; align-items: center; justify-content: center; gap: 0.25cqw; }
+.house { width: 1.15cqw; height: 1.15cqw; background: #1f8a3a; border: 0.12cqw solid #fff; }
+.hotel { width: 2.6cqw; height: 1.4cqw; background: #d0141c; border: 0.12cqw solid #fff; }
+.space-name { padding: 0.5cqw 0.3cqw 0; font-size: 0.95cqw; font-weight: 800; line-height: 1.12; letter-spacing: 0.02em; text-align: center; }
+.art { font-size: 3cqw; line-height: 1; }
+.chance-q { font-family: Georgia, 'Times New Roman', serif; font-weight: 900; font-size: 5.2cqw; color: #e2231a; text-shadow: 0.15cqw 0.15cqw 0 #111; }
+.chance-q.c22 { color: #1576c9; }
+.chance-q.c36 { color: #f39321; }
+.price { font-size: 0.95cqw; font-weight: 700; padding-bottom: 0.6cqw; }
+.owner-strip { position: absolute; left: 0; right: 0; bottom: 0; height: 0.45cqw; }
+.space.mortgaged .face::after { content: ''; position: absolute; inset: 21% 0 0 0; background: repeating-linear-gradient(45deg, rgba(0,0,0,.12) 0 0.5cqw, transparent 0.5cqw 1cqw); }
+.mort { position: absolute; top: 46%; left: 0; right: 0; font-size: 0.8cqw; font-weight: 800; color: #b00020; background: rgba(255,255,255,.75); }
+
+/* Corners */
+.corner-face { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; font-weight: 900; }
+.corner-face.go { transform: rotate(-45deg); }
+.corner-face.parking { transform: rotate(135deg); }
+.corner-face.gotojail { transform: rotate(-135deg); }
+.small-print { font-size: 0.85cqw; width: 70%; line-height: 1.1; }
+.go-word { font-size: 4.6cqw; color: #e2231a; line-height: 1; letter-spacing: 0.05em; }
+.go-arrow { font-size: 3.6cqw; color: #e2231a; line-height: 0.8; }
+.corner-word { font-size: 1.5cqw; line-height: 1.1; }
+.corner-art { font-size: 4.2cqw; line-height: 1.15; }
+.jail-corner { position: absolute; inset: 0; }
+.jail-cell { position: absolute; right: 0; top: 0; width: 70%; height: 70%; background: #f39321; border-left: 0.18cqw solid var(--ink); border-bottom: 0.18cqw solid var(--ink); display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.bars { position: absolute; inset: 14% 16%; background: repeating-linear-gradient(90deg, #111 0 0.3cqw, transparent 0.3cqw 1.3cqw); opacity: 0.85; }
+.jail-word { position: relative; font-size: 1.1cqw; font-weight: 900; background: #fff; padding: 0 0.4cqw; transform: rotate(45deg); }
+.just, .visiting { position: absolute; font-size: 1.15cqw; font-weight: 900; }
+.just { left: 0; top: 35%; width: 30%; transform: rotate(90deg); text-align: center; }
+.visiting { bottom: 3%; left: 30%; right: 0; text-align: center; }
+.jail-cell .tokens { position: absolute; inset: 0; align-content: center; }
+.visitors { position: absolute; left: 0; bottom: 0; width: 30%; height: 30%; }
+.visitors .tokens { position: absolute; inset: auto 0 0 0; }
+
+.tokens { position: absolute; inset: auto 0 0.2cqw 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 0.2cqw; padding: 0.2cqw; z-index: 2; }
+.token { font-size: 2.2cqw; line-height: 1; background: #fff; border: 0.35cqw solid; border-radius: 50%; width: 3.4cqw; height: 3.4cqw; display: grid; place-items: center; box-shadow: 0 1px 3px rgba(0,0,0,.4); text-transform: none; }
 .token.active { animation: bob 1.2s ease-in-out infinite; }
 @keyframes bob { 50% { transform: translateY(-0.5cqw); } }
 @media (prefers-reduced-motion: reduce) { .token.active { animation: none; } }
 
-.center { grid-row: 2 / 11; grid-column: 2 / 11; background: var(--board); display: flex; align-items: center; justify-content: center; overflow: auto; color: var(--text); }
-.center-inner { width: 92%; max-height: 100%; display: flex; flex-direction: column; align-items: center; gap: 1.2cqw; padding: 1cqw 0; font-size: max(13px, 1.8cqw); }
+/* Centre: logo row, game controls, card-deck row. Stacked in normal flow so they never overlap. */
+.center { position: relative; grid-row: 2 / 11; grid-column: 2 / 11; background: var(--mint); display: flex; flex-direction: column; align-items: stretch; min-height: 0; overflow: hidden; color: #1d2420; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }
+.logo-row { flex: 0 0 auto; display: flex; justify-content: center; padding: 2.2cqw 0 1.2cqw; }
+.logo-banner {
+  transform: rotate(-4deg);
+  background: #e2231a; color: #fff; border: 0.45cqw solid #111; outline: 0.3cqw solid #fff; outline-offset: -0.9cqw;
+  padding: 0.8cqw 3.5cqw; font-family: 'Arial Black', 'Helvetica Neue', Arial, sans-serif; font-weight: 900;
+  font-size: 5cqw; line-height: 1.05; letter-spacing: 0.08em; text-shadow: 0.2cqw 0.2cqw 0 #111; white-space: nowrap;
+}
+.center-play { flex: 1 1 auto; min-height: 0; overflow: auto; display: flex; flex-direction: column; align-items: center; }
+.deck-row { flex: 0 0 auto; display: flex; justify-content: space-between; padding: 1cqw 3cqw 2cqw; }
+.deck-slot {
+  width: 19cqw; height: 7cqw; border: 0.3cqw dashed #111; border-radius: 0.6cqw;
+  display: flex; align-items: center; justify-content: center; gap: 0.8cqw;
+  font-weight: 900; text-transform: uppercase; font-size: 1.3cqw; font-family: 'Arial Narrow', Arial, sans-serif;
+}
+.chest-slot { background: rgba(21, 118, 201, 0.12); color: #0b4f8a; }
+.chance-slot { background: rgba(243, 147, 33, 0.15); color: #b45f00; }
+.deck-icon { font-size: 3.4cqw; line-height: 1; }
+.chance-slot .deck-icon { font-family: Georgia, serif; color: #f39321; text-shadow: 0.15cqw 0.15cqw 0 #111; }
+.auction, .debt { color: var(--text); }
+.last-log { background: rgba(205, 230, 208, 0.85); border-radius: 6px; padding: 2px 8px; color: #33413a !important; }
+.center-inner { width: 92%; margin: auto 0; display: flex; flex-direction: column; align-items: center; gap: 1.2cqw; padding: 1cqw 0; font-size: max(13px, 1.8cqw); }
 .banner { color: #fff; font-weight: 700; padding: 1cqw 2.5cqw; border-radius: 999px; text-shadow: 0 1px 2px rgba(0,0,0,.4); font-size: max(15px, 2.6cqw); text-align: center; }
 .dice { font-size: max(40px, 8cqw); line-height: 1; letter-spacing: 1cqw; color: var(--text); }
 .pot { font-weight: 600; }
@@ -189,8 +245,6 @@ h3 { margin: 16px 0 8px; font-size: 1rem; }
 /* Phones: the board is ~370px wide, so cqw-sized tokens would be ~12px. Keep them big enough to spot. */
 @media (max-width: 600px) {
   .token { width: 20px; height: 20px; font-size: 13px; border-width: 2px; }
-  .space .icon { font-size: 11px; }
-  .space-name { font-size: max(5.5px, 1.15cqw); }
 }
 
 /* ------------------------------------------------ animation */
