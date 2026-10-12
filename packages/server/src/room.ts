@@ -91,6 +91,7 @@ export class Room {
       case 'startGame': return this.startGame(client);
       case 'endGame': return this.endGame(client);
       case 'removePlayer': return this.removePlayer(client, msg.playerId);
+      case 'giveMoney': return this.giveMoney(client, msg.playerId, msg.amount);
       case 'action': return this.action(client, msg.action as Action, msg.clientSeq);
       default: return client.send({ type: 'error', message: `Unknown message ${msg.type}` });
     }
@@ -248,6 +249,17 @@ export class Room {
     if (typeof playerId !== 'string' || playerId === client.playerId)
       return client.send({ type: 'error', message: 'Use "Leave game" to leave yourself' });
     const error = this.dispatch({ action: { type: 'REMOVE_PLAYER', playerId }, by: 'host', seq: this.game.actions.length + 1 });
+    if (error) client.send({ type: 'error', message: error });
+  }
+
+  /** In a game played only by computer players (people just watching), the admin can hand anyone money from the bank. */
+  private giveMoney(client: Client, playerId: unknown, amount: unknown) {
+    if (!this.game) return client.send({ type: 'error', message: 'No game is running' });
+    if (client.playerId !== this.adminId) return client.send({ type: 'error', message: 'Only the room admin can give money' });
+    if (!this.seats.filter((s) => !s.watching).every((s) => s.bot))
+      return client.send({ type: 'error', message: 'Giving money is only for games where every player is a computer' });
+    if (typeof playerId !== 'string') return;
+    const error = this.dispatch({ action: { type: 'GIVE_MONEY', playerId, amount: Number(amount) }, by: 'host', seq: this.game.actions.length + 1 });
     if (error) client.send({ type: 'error', message: error });
   }
 

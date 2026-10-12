@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { activePlayers, applyAction, boardLeader, CARDS, groupSpaces, randomBotAction, strategyBotAction, newBotMemory, waitingOn, type BotMemory, type GameState } from '../src';
+import { activePlayers, allianceChampion, applyAction, boardLeader, CARDS, groupSpaces, randomBotAction, strategyBotAction, newBotMemory, waitingOn, type BotMemory, type GameState } from '../src';
 import { checkInvariants, mulberry, newGame } from './helpers';
 
 /** Plays a game where players listed in `smart` use the strategy bot and the rest the random bot. */
@@ -291,6 +291,22 @@ describe('strategy bot', () => {
 
     // p3 is the stronger ally, so it is the champion.
     const strongP3 = (s: GameState) => { leaderP2(s); s.players.find((p) => p.id === 'p3')!.cash = 5000; };
+
+    it('name the champion for display', () => {
+      const s = setup({}, strongP3);
+      expect(allianceChampion(s, ['p1', 'p3'])).toBe('p3');
+      expect(allianceChampion(s, ['p1'])).toBeNull(); // no alliance of one
+      expect(allianceChampion(setup({}), ['p1', 'p3'])).toBeNull(); // nobody controls the board
+    });
+
+    it('the host can give money, and only the host', () => {
+      const s = setup({});
+      expect(applyAction(s, { action: { type: 'GIVE_MONEY', playerId: 'p2', amount: 300 }, by: 'p1', seq: 1 })).toHaveProperty('error');
+      const r = applyAction(s, { action: { type: 'GIVE_MONEY', playerId: 'p2', amount: 300 }, by: 'host', seq: 1 });
+      if ('error' in r) throw new Error(r.error);
+      expect(r.state.players.find((p) => p.id === 'p2')!.cash).toBe(1800);
+      expect(applyAction(s, { action: { type: 'GIVE_MONEY', playerId: 'p2', amount: -5 }, by: 'host', seq: 1 })).toHaveProperty('error');
+    });
 
     it('pour everything into the strongest ally', () => {
       const s = setup({ 39: 'p1', 5: 'p1' }, (s) => { strongP3(s); giveCard(s, 'p1'); });

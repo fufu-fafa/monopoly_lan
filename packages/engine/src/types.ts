@@ -125,6 +125,7 @@ export type Action =
   | { type: 'PASS_BID' }
   | { type: 'CLOSE_AUCTION' } // host only
   | { type: 'REMOVE_PLAYER'; playerId: PlayerId } // host only: a player who left; their property goes to the bank
+  | { type: 'GIVE_MONEY'; playerId: PlayerId; amount: number } // host only: the bank gives a player money
   | { type: 'LEAVE_GAME' }
   | { type: 'BUILD' | 'SELL_BUILDING' | 'MORTGAGE' | 'UNMORTGAGE'; space: number }
   | { type: 'PROPOSE_TRADE'; offer: Omit<TradeOffer, 'id' | 'from'> & { from?: PlayerId } }

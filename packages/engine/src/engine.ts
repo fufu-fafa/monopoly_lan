@@ -584,6 +584,16 @@ function dispatch(ctx: Ctx, env: Envelope) {
     declareBankruptcy(ctx, a.playerId, true);
     return;
   }
+  if (a.type === 'GIVE_MONEY') {
+    if (env.by !== 'host') fail('Only the host gives money');
+    const target = getPlayer(s, a.playerId);
+    if (!target || target.bankrupt) fail('That player is not in the game');
+    const amount = Number(a.amount);
+    if (!Number.isInteger(amount) || amount < 1 || amount > 10_000) fail('Give between $1 and $10,000');
+    transfer(ctx, 'bank', a.playerId, amount, 'gift from the host');
+    log(ctx, `The host gave ${target.name} $${amount}.`);
+    return;
+  }
   if (env.by === 'host') fail('The host can only close auctions');
   const by = env.by;
   const me = mustPlayer(s, by);

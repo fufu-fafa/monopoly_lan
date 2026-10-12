@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
-  BOARD, GROUP_COLORS, legalActions, netWorth, ownedProperties, propertySpace, rentFor, space, totalDebt,
+  BOARD, GROUP_COLORS, allianceChampion, boardLeader, legalActions, netWorth, ownedProperties, propertySpace, rentFor, space, totalDebt,
   unmortgageCost, waitingOn, whyCannotBuild, whyCannotMortgage, whyCannotSell, whyCannotUnmortgage,
   type Action, type Assets, type GameState, type GameStats, type Player, type TradeOffer,
 } from '@monopoly/engine';
@@ -72,6 +72,12 @@ export function Game({ conn }: { conn: Connection }) {
         <div className="tab-body">
           {tab === 'players' && (
             <Players state={state} presence={presence} me={me} isAdmin={isAdmin}
+              advancedBots={lobby?.seats.filter((s) => s.bot && s.advanced !== false).map((s) => s.playerId) ?? []}
+              canGive={isAdmin && !!lobby?.seats.filter((s) => !s.watching).every((s) => s.bot)}
+              onGive={(p) => {
+                const amount = Number(prompt(`How much should the bank give ${p.name}?`, '200'));
+                if (Number.isInteger(amount) && amount > 0) send({ type: 'giveMoney', playerId: p.id, amount });
+              }}
               onRemove={(p) => confirm(`Remove ${p.name} from the game? Their property goes back to the bank.`) && send({ type: 'removePlayer', playerId: p.id })} />
           )}
           {tab === 'manage' && meP && <Manage state={state} me={meP} act={act} onSpace={setSelected} />}
@@ -297,9 +303,12 @@ function MyStatus({ state, me }: { state: GameState; me: Player }) {
   );
 }
 
-function Players({ state, presence, me, isAdmin, onRemove }: {
-  state: GameState; presence: Record<string, boolean>; me: string | null; isAdmin: boolean; onRemove: (p: Player) => void;
+function Players({ state, presence, me, isAdmin, advancedBots, canGive, onGive, onRemove }: {
+  state: GameState; presence: Record<string, boolean>; me: string | null; isAdmin: boolean;
+  advancedBots: string[]; canGive: boolean; onGive: (p: Player) => void; onRemove: (p: Player) => void;
 }) {
+  const leader = state.winner ? null : boardLeader(state);
+  const champion = state.winner ? null : allianceChampion(state, advancedBots);
   return (
     <ul className="players">
       {state.turnOrder.map((id) => {
@@ -311,11 +320,16 @@ function Players({ state, presence, me, isAdmin, onRemove }: {
               <span>{p.bankrupt ? 'Out' : `$${p.cash}`}</span>
             </div>
             <div className="muted small">
+              {id === leader && <span className="badge" title="Owns at least 10 deeds and more than half the value of all owned property">👑 controls the board</span>}
+              {id === champion && <span className="badge" title="The computer players are pooling everything into this player to beat the leader">🛡 champion</span>}
               {!presence[id] && !p.bankrupt && <span className="badge off">offline</span>}
               {p.inJail && ' 🔒 in jail'}
               {p.jailCards.length > 0 && ` 🎟 ${p.jailCards.length}`}
               {!p.bankrupt && ` · on ${space(p.position).name}`}
             </div>
+            {canGive && !p.bankrupt && !state.winner && (
+              <button className="link small" onClick={() => onGive(p)}>Give money</button>
+            )}
             {isAdmin && id !== me && !p.bankrupt && !state.winner && (
               <button className="link danger small" disabled={state.pending?.type === 'auction'} onClick={() => onRemove(p)}>
                 Remove from game

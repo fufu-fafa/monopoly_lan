@@ -150,9 +150,15 @@ function isAlly(s: GameState, me: PlayerId, pid: PlayerId): boolean {
  * out from the same state, so they all agree without talking.
  */
 function champion(s: GameState, me: PlayerId): PlayerId | null {
+  if (!advanced || boardLeader(s) === me) return null;
+  return allianceChampion(s, [me, ...allies]);
+}
+
+/** The champion of the advanced bots `advancedBots` against the board leader, if there is an alliance (for display too). */
+export function allianceChampion(s: GameState, advancedBots: PlayerId[]): PlayerId | null {
   const leader = boardLeader(s);
-  if (!advanced || !leader || leader === me) return null;
-  const team = [me, ...allies.filter((a) => isAlly(s, me, a))];
+  if (!leader) return null;
+  const team = advancedBots.filter((id) => id !== leader && getPlayer(s, id)?.bankrupt === false);
   if (team.length < 2) return null;
   return team.sort((a, b) => strategicValue(s, b) - strategicValue(s, a) || a.localeCompare(b))[0];
 }

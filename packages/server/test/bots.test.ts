@@ -102,6 +102,14 @@ await until(() => kp.lobby.seats.length === 4, 2000, 'bot removed');
 
 kp.send({ type: 'startGame' });
 await until(() => !!kp.state, 2000, 'game start');
+// Giving money is only for games played by computers alone; here a person is playing.
+const target = kp.state!.players.find((p) => p.id !== kp.me)!;
+guest.send({ type: 'giveMoney', playerId: target.id, amount: 500 });
+await wait(100);
+assert(guest.errors.includes('Only the room admin can give money'), 'only the admin gives money');
+kp.send({ type: 'giveMoney', playerId: target.id, amount: 500 });
+await wait(100);
+assert(kp.errors.includes('Giving money is only for games where every player is a computer'), 'no gifts while a person plays');
 await until(() => !!kp.state?.winner, 240_000, 'game end');
 const s = kp.state!;
 const winner = s.players.find((p) => p.id === s.winner)!;
