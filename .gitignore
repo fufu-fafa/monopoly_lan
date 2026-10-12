@@ -3,6 +3,5 @@
 *~
 node_modules/
 packages/client/dist/
-games/*
-!games/.gitkeep
+games/
 PLAN.md
