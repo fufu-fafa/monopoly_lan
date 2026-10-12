@@ -289,6 +289,43 @@ describe('strategy bot', () => {
       expect(strategyBotAction(alone, 'p3', newBotMemory())?.type).toBe('DECLARE_BANKRUPTCY');
     });
 
+    // p3 is the stronger ally, so it is the champion.
+    const strongP3 = (s: GameState) => { leaderP2(s); s.players.find((p) => p.id === 'p3')!.cash = 5000; };
+
+    it('pour everything into the strongest ally', () => {
+      const s = setup({ 39: 'p1', 5: 'p1' }, (s) => { strongP3(s); giveCard(s, 'p1'); });
+      const a = strategyBotAction(s, 'p1', ally('p1'));
+      expect(a?.type).toBe('PROPOSE_TRADE');
+      if (a?.type !== 'PROPOSE_TRADE') return;
+      expect(a.offer.to).toBe('p3');
+      expect(a.offer.give).toEqual({ cash: 1500, properties: [5, 39], jailCards: [s.players[0].jailCards[0]] });
+      expect(a.offer.get).toEqual({ cash: 0, properties: [], jailCards: [] });
+      // The champion takes it.
+      const r = applyAction(s, { action: a, by: 'p1', seq: 1 });
+      if ('error' in r) throw new Error(r.error);
+      expect(strategyBotAction(r.state, 'p3', ally('p3'))?.type).toBe('ACCEPT_TRADE');
+      // A bot outside the alliance keeps its things.
+      expect(strategyBotAction(s, 'p1', newBotMemory())?.type).toBe('ROLL_DICE');
+    });
+
+    it('sell buildings first so the sets can move to the champion', () => {
+      const s = setup({}, (s) => {
+        strongP3(s);
+        for (const i of groupSpaces('orange')) s.properties[i] = { ownerId: 'p1', buildings: 2, mortgaged: false };
+        s.bank.houses -= 6;
+      });
+      expect(strategyBotAction(s, 'p1', ally('p1'))?.type).toBe('SELL_BUILDING');
+    });
+
+    it('leave auctions to the champion', () => {
+      const s = setup({}, (s) => {
+        strongP3(s);
+        s.pending = { type: 'auction', id: 1, space: 39, highBid: 50, highBidder: 'p2', bidders: ['p1', 'p2', 'p3'] };
+      });
+      expect(strategyBotAction(s, 'p1', ally('p1'))?.type).toBe('PASS_BID');
+      expect(strategyBotAction(s, 'p3', ally('p3'))?.type).toBe('BID');
+    });
+
     it('accept a deal that costs a little but helps the alliance more', () => {
       const [stJames, tennessee, newYork] = groupSpaces('orange');
       const s = setup({ [stJames]: 'p3', [tennessee]: 'p3', [newYork]: 'p1' }, (s) => {

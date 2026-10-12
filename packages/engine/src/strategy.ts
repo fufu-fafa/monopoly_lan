@@ -21,8 +21,9 @@ import type { Action, Assets, ColorGroup, GameState, PlayerId, TradeOffer } from
  * Each call returns one action (or null when there is nothing to do); the caller loops.
  *
  * When a leader controls the board, advanced bots also work together against them (see `allies`):
- * they trade with each other for the alliance's gain, stay out of each other's auctions, and buy a
- * property off an ally who would otherwise go bankrupt to the leader.
+ * they pick the strongest of them as a champion and pour everything into it (cash, property, jail
+ * cards; buildings are sold first so their sets can move), leave auctions to it, trade with each
+ * other for the alliance's gain, and buy a property off an ally who would otherwise go bankrupt to the leader.
  *
  * A basic bot (`advanced: false`) plays the same, except that it ignores who controls the board:
  * it never goes all in against a leader, does not refuse trades over board control, and joins no alliance.
@@ -144,6 +145,18 @@ function isAlly(s: GameState, me: PlayerId, pid: PlayerId): boolean {
   return !!leader && leader !== me && leader !== pid;
 }
 
+/**
+ * The alliance's champion: its strongest member, by property value plus cash. Every ally works it
+ * out from the same state, so they all agree without talking.
+ */
+function champion(s: GameState, me: PlayerId): PlayerId | null {
+  const leader = boardLeader(s);
+  if (!advanced || !leader || leader === me) return null;
+  const team = [me, ...allies.filter((a) => isAlly(s, me, a))];
+  if (team.length < 2) return null;
+  return team.sort((a, b) => strategicValue(s, b) - strategicValue(s, a) || a.localeCompare(b))[0];
+}
+
 /** Value to `pid` of gaining property `i`, plus what it denies the opponent who wants it most (all of it against a board leader). */
 function propertyWorth(s: GameState, pid: PlayerId, i: number): { mine: number; block: number } {
   const leader = advanced ? boardLeader(s) : null;
@@ -249,6 +262,11 @@ function decide(s: GameState, me: PlayerId, mem: BotMemory): Action | null {
     return has('BUY') && shouldBuy(s, me, s.pending.space) ? { type: 'BUY' } : { type: 'DECLINE_BUY' };
   }
 
+  if (!s.pending) {
+    const dump = dumpToChampion(s, me, legal);
+    if (dump) return dump;
+  }
+
   if (s.pending || s.turn.playerId !== me) return null;
 
   // Own turn: tidy up offers nobody answered, then manage, trade, and roll.
@@ -289,6 +307,9 @@ function shouldBuy(s: GameState, me: PlayerId, i: number): boolean {
 function auctionAction(s: GameState, me: PlayerId, legal: Action[]): Action | null {
   const a = s.pending;
   if (a?.type !== 'auction' || !a.bidders.includes(me) || a.highBidder === me) return null;
+  // Supporters leave auctions to the champion, who now holds the alliance's cash.
+  const champ = champion(s, me);
+  if (champ && champ !== me && a.bidders.includes(champ)) return legal.some((x) => x.type === 'PASS_BID') ? { type: 'PASS_BID' } : null;
   // Let an ally have it cheaply rather than bid them up; the leader is the one to outbid.
   if (a.highBidder && isAlly(s, me, a.highBidder)) return legal.some((x) => x.type === 'PASS_BID') ? { type: 'PASS_BID' } : null;
   const sp = propertySpace(a.space)!;
@@ -476,6 +497,9 @@ function acceptable(s: GameState, me: PlayerId, partner: PlayerId, give: Assets,
 }
 
 function wouldAccept(s: GameState, t: TradeOffer): boolean {
+  // An ally handing over everything to their champion.
+  const gift = !t.get.cash && !t.get.properties.length && !t.get.jailCards.length;
+  if (gift && isAlly(s, t.to, t.from)) return true;
   if (isRescue(s, t, t.to)) {
     // Keeping an ally's property out of the leader's hands is worth paying over the odds for.
     const g = tradeGains(s, t.from, t.to, t.give, t.get);
@@ -566,6 +590,32 @@ function tradeAction(s: GameState, me: PlayerId, mem: BotMemory): Action | null 
   if (!best) return null;
   mem.proposed.add(best.key);
   return { type: 'PROPOSE_TRADE', offer: best.offer };
+}
+
+// ------------------------------------------------------------------ alliance champion
+
+/**
+ * A supporter gives the champion everything it has. Buildings cannot change hands, so it sells them
+ * back to the bank first (at half price) to free its sets. It keeps nothing back: a supporter who
+ * then goes bankrupt to the leader hands the leader almost nothing.
+ */
+function dumpToChampion(s: GameState, me: PlayerId, legal: Action[]): Action | null {
+  const champ = champion(s, me);
+  if (!champ || champ === me || debtsOf(s, me).length || tradesBlocked(s)) return null;
+  if (s.trades.some((t) => t.from === me && t.to === champ)) return null; // waiting for it to accept
+  const sell = legal
+    .filter((a): a is SpaceAction => a.type === 'SELL_BUILDING')
+    .sort((x, y) => s.properties[y.space].buildings - s.properties[x.space].buildings)[0];
+  if (sell) return sell;
+  const p = getPlayer(s, me)!;
+  const give: Assets = {
+    cash: p.cash,
+    properties: ownedProperties(s, me).filter((i) => !setHasBuildings(s, i)),
+    jailCards: [...p.jailCards],
+  };
+  if (!give.cash && !give.properties.length && !give.jailCards.length) return null;
+  if (whyAssetsInvalid(s, me, give)) return null;
+  return { type: 'PROPOSE_TRADE', offer: { to: champ, give, get: { cash: 0, properties: [], jailCards: [] } } };
 }
 
 // ------------------------------------------------------------------ alliance rescue
