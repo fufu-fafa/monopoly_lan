@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { Action, GameEvent, GameState } from '@monopoly/engine';
+import type { Action, GameEvent, GameState, GameStats } from '@monopoly/engine';
 import { useAnimator, type CardShown, type StateMsg } from './animator';
 
 export type { CardShown } from './animator';
 
-export interface SeatView { playerId: string; name: string; token: string; color: string }
+export interface SeatView { playerId: string; name: string; token: string; color: string; bot?: boolean; watching?: boolean }
 export interface LobbyOptions { startingCash: number; freeParkingJackpot: boolean; shuffleOrder: boolean }
 export interface LobbyView {
   seats: SeatView[];
@@ -32,6 +32,7 @@ export function useConnection() {
   const [clockOffset, setClockOffset] = useState(0); // serverNow - Date.now()
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [lastEvents, setLastEvents] = useState<GameEvent[]>([]);
+  const [stats, setStats] = useState<GameStats | null>(null);
   const [card, setCard] = useState<CardShown | null>(null);
   const ws = useRef<WebSocket | null>(null);
   const toastId = useRef(1);
@@ -43,6 +44,7 @@ export function useConnection() {
     setAuctionClosesAt(msg.auctionClosesAt);
     setClockOffset(msg.serverNow - Date.now());
     setLastEvents(msg.events);
+    setStats(msg.stats ?? null);
   }, []);
   const anim = useAnimator(applyState, setCard);
   const animRef = useRef(anim);
@@ -118,7 +120,7 @@ export function useConnection() {
   const act = useCallback((action: Action) => send({ type: 'action', action, clientSeq: clientSeq.current++ }), [send]);
 
   return {
-    online, me, lobby, state, presence, auctionClosesAt, clockOffset, toasts, lastEvents, card,
+    online, me, lobby, state, presence, auctionClosesAt, clockOffset, toasts, lastEvents, card, stats,
     anim: anim.view, speed: anim.speed, setSpeed: anim.setSpeed,
     send, act, toast, dismissCard: () => setCard(null),
   };

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   BOARD, GROUP_COLORS, legalActions, netWorth, ownedProperties, propertySpace, rentFor, space, totalDebt,
   unmortgageCost, waitingOn, whyCannotBuild, whyCannotMortgage, whyCannotSell, whyCannotUnmortgage,
-  type Action, type Assets, type GameState, type Player, type TradeOffer,
+  type Action, type Assets, type GameState, type GameStats, type Player, type TradeOffer,
 } from '@monopoly/engine';
 import type { Connection } from '../net';
 import type { Speed } from '../animator';
@@ -75,7 +75,13 @@ export function Game({ conn }: { conn: Connection }) {
           )}
           {tab === 'manage' && meP && <Manage state={state} me={meP} act={act} onSpace={setSelected} />}
           {tab === 'trades' && meP && <Trades state={state} me={meP} act={act} onNew={(t) => setTrade(t ?? {})} />}
-          {tab === 'log' && <Log state={state} />}
+          {tab === 'log' && (
+            <>
+              {conn.stats && <Stats state={state} stats={conn.stats} />}
+              <h3>Events</h3>
+              <Log state={state} />
+            </>
+          )}
         </div>
         <label className="row small speed">
           Game speed
@@ -131,7 +137,7 @@ function Center({ conn, me, children }: { conn: Connection; me: Player | null; c
   else if (turnP.id === me?.id) banner = 'Your turn';
   else banner = `${turnP.name}'s turn`;
   const offline = state.winner ? [] : waiting.filter((id) => id !== me?.id && !presence[id]);
-  const isAdmin = !!me && me.id === lobby?.adminId;
+  const isAdmin = conn.me !== null && conn.me === lobby?.adminId; // the admin may be watching, not playing
 
   return (
     <div className="center-inner">
@@ -419,6 +425,49 @@ function Trades({ state, me, act, onNew }: { state: GameState; me: Player; act: 
       {incoming.length ? <ul className="trades">{incoming.map((t) => row(t, false))}</ul> : <p className="muted small">None</p>}
       <h3>Your offers</h3>
       {outgoing.length ? <ul className="trades">{outgoing.map((t) => row(t, true))}</ul> : <p className="muted small">None</p>}
+    </div>
+  );
+}
+
+/** Per-player totals for the game so far, plus the spaces landed on most. */
+function Stats({ state, stats }: { state: GameState; stats: GameStats }) {
+  const players = state.turnOrder.map((id) => state.players.find((p) => p.id === id)!);
+  const st = (id: string) => stats.players[id];
+  const money = (n: number) => `$${n}`;
+  const rows: [string, (p: Player) => string | number][] = [
+    ['Net worth', (p) => (p.bankrupt ? 'out' : money(netWorth(state, p.id)))],
+    ['Properties owned', (p) => ownedProperties(state, p.id).length],
+    ['Properties bought', (p) => st(p.id)?.propertiesBought ?? 0],
+    ['Rent received', (p) => money(st(p.id)?.rentReceived ?? 0)],
+    ['Rent paid', (p) => money(st(p.id)?.rentPaid ?? 0)],
+    ['Taxes and fees', (p) => money(st(p.id)?.taxesAndFees ?? 0)],
+    ['Spent on houses', (p) => money(st(p.id)?.spentOnBuildings ?? 0)],
+    ['Passed GO', (p) => st(p.id)?.passedGo ?? 0],
+    ['Dice rolls', (p) => st(p.id)?.rolls ?? 0],
+    ['Doubles', (p) => st(p.id)?.doubles ?? 0],
+    ['Sent to jail', (p) => st(p.id)?.timesInJail ?? 0],
+    ['Cards drawn', (p) => st(p.id)?.cardsDrawn ?? 0],
+  ];
+  const top = Object.entries(stats.landings).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  return (
+    <div className="stats">
+      <h3>Statistics <span className="muted small">turn {state.turn.number}</span></h3>
+      <div className="stats-scroll">
+        <table className="stats-table">
+          <thead>
+            <tr><th />{players.map((p) => <th key={p.id} title={p.name} style={{ borderBottomColor: p.color }}>{p.token}<div className="small">{p.name}</div></th>)}</tr>
+          </thead>
+          <tbody>
+            {rows.map(([label, f]) => <tr key={label}><td>{label}</td>{players.map((p) => <td key={p.id}>{f(p)}</td>)}</tr>)}
+          </tbody>
+        </table>
+      </div>
+      {top.length > 0 && (
+        <>
+          <div className="small muted stats-sub">Landed on most</div>
+          <ol className="stats-top">{top.map(([i, n]) => <li key={i}>{BOARD[Number(i)].name} <span className="muted">×{n}</span></li>)}</ol>
+        </>
+      )}
     </div>
   );
 }

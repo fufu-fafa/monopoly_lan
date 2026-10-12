@@ -68,6 +68,8 @@ class Bot {
       if (a) this.send({ type: 'action', action: a, clientSeq: 1 });
       return;
     }
+    // Only trade offers came up this time; try again rather than stalling the game.
+    setTimeout(() => this.maybeAct(), 20);
   }
 }
 
@@ -88,6 +90,8 @@ bots[1].send({ type: 'startGame' });
 await wait(100);
 assert(bots[1].errors.includes('Only the room admin can start'), 'non-admin start refused');
 
+// Hold the bots still until the out-of-turn check below is done, so the turn cannot move under it.
+paused = true;
 bots[0].send({ type: 'setOptions', options: { freeParkingJackpot: true, startingCash: 500 } });
 bots[0].send({ type: 'startGame' });
 await until(() => bots.every((b) => b.state), 2000, 'game start');
@@ -100,6 +104,7 @@ notTurn.send({ type: 'action', action: { type: 'ROLL_DICE' }, clientSeq: 99, by:
 await wait(100);
 assert(notTurn.errors.includes('It is not your turn'), 'acting out of turn is refused');
 
+paused = false;
 for (const b of bots) b.maybeAct();
 await until(() => bots[0].seq >= 150, 60_000, '150 actions');
 

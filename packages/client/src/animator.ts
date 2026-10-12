@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { GameEvent, GameState } from '@monopoly/engine';
+import type { GameEvent, GameState, GameStats } from '@monopoly/engine';
 
 export type Speed = 'slow' | 'normal' | 'fast';
 const SPEED_FACTOR: Record<Speed, number> = { slow: 1.6, normal: 1, fast: 0.55 };
@@ -13,7 +13,7 @@ const LONG_STEP_MS = 110;  // per space when a card sends a token far
 const CARD_MS = 1600;      // time to read a card before its move happens
 const SETTLE_MS = 350;     // pause after landing before the new state appears
 
-export interface StateMsg { state: GameState; events: GameEvent[]; auctionClosesAt: number | null; serverNow: number }
+export interface StateMsg { state: GameState; events: GameEvent[]; stats?: GameStats; auctionClosesAt: number | null; serverNow: number }
 
 export interface CardShown { text: string; deck: 'chance' | 'chest'; playerId: string; at: number }
 

@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "tsx src/index.ts",
-    "test": "tsx test/server.test.ts"
+    "test": "tsx test/server.test.ts && tsx test/bots.test.ts"
   },
   "dependencies": {
     "@monopoly/engine": "*",

@@ -36,6 +36,7 @@ export function Lobby({ conn }: { conn: Connection }) {
   const isAdmin = me !== null && me === lobby.adminId;
   const mySeat = lobby.seats.find((s) => s.playerId === me);
   const o = lobby.options;
+  const playing = lobby.seats.filter((s) => !s.watching).length;
 
   return (
     <div className="lobby">
@@ -69,14 +70,14 @@ export function Lobby({ conn }: { conn: Connection }) {
               <button type="button" key={c} disabled={taken.has(c)} aria-label={c} className={`choice swatch ${pickColor === c ? 'on' : ''}`} style={{ background: c }} onClick={() => setColor(c)} />
             ))}
           </div>
-          <button className="primary" disabled={!name.trim() || lobby.seats.length >= 8}>
-            {lobby.seats.length >= 8 ? 'The table is full' : 'Join the game'}
+          <button className="primary" disabled={!name.trim() || playing >= 8}>
+            {playing >= 8 ? 'The table is full' : 'Join the game'}
           </button>
         </form>
       )}
 
       <div className="card">
-        <h2>Players ({lobby.seats.length}/8)</h2>
+        <h2>Players ({playing}/8)</h2>
         {lobby.seats.length === 0 && <p className="muted">Nobody has joined yet.</p>}
         <ul className="seat-list">
           {lobby.seats.map((s) => (
@@ -84,11 +85,25 @@ export function Lobby({ conn }: { conn: Connection }) {
               <span className="seat-token" style={{ borderColor: s.color }}>{s.token}</span>
               <span className="seat-name">{s.name}{s.playerId === me && ' (you)'}</span>
               {s.playerId === lobby.adminId && <span className="badge">admin</span>}
+              {s.bot && <span className="badge off">computer</span>}
+              {s.watching && <span className="badge off">watching</span>}
+              {s.bot && isAdmin && <button className="link" onClick={() => send({ type: 'removeBot', playerId: s.playerId })}>Remove</button>}
               {!presence[s.playerId] && <span className="badge off">offline</span>}
             </li>
           ))}
         </ul>
-        {mySeat && <button className="link" onClick={() => send({ type: 'leaveSeat' })}>Leave my seat</button>}
+        {mySeat && !mySeat.bot && (
+          <label className="row">
+            <input type="checkbox" checked={!!mySeat.watching} onChange={(e) => send({ type: 'setWatching', watching: e.target.checked })} />
+            Just watch (I won't play, e.g. to watch computer players)
+          </label>
+        )}
+        <div className="row">
+          {isAdmin && playing < 8 && (
+            <button onClick={() => send({ type: 'addBot' })}>Add a computer player</button>
+          )}
+          {mySeat && <button className="link" onClick={() => send({ type: 'leaveSeat' })}>Leave my seat</button>}
+        </div>
       </div>
 
       <div className="card">
@@ -109,8 +124,8 @@ export function Lobby({ conn }: { conn: Connection }) {
           Random turn order (otherwise in joining order)
         </label>
         {isAdmin && (
-          <button className="primary" disabled={lobby.seats.length < 2} onClick={() => send({ type: 'startGame' })}>
-            {lobby.seats.length < 2 ? 'Waiting for at least 2 players' : 'Start the game'}
+          <button className="primary" disabled={playing < 2} onClick={() => send({ type: 'startGame' })}>
+            {playing < 2 ? 'Waiting for at least 2 players' : mySeat?.watching ? 'Start the game and watch' : 'Start the game'}
           </button>
         )}
       </div>
