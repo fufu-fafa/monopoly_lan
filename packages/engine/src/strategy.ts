@@ -20,24 +20,30 @@ import type { Action, Assets, ColorGroup, GameState, PlayerId, TradeOffer } from
  *   and no bot makes a trade that would hand its partner control of the board.
  * Each call returns one action (or null when there is nothing to do); the caller loops.
  *
+ * When a leader controls the board, advanced bots also work together against them (see `allies`):
+ * they trade with each other for the alliance's gain, stay out of each other's auctions, and buy a
+ * property off an ally who would otherwise go bankrupt to the leader.
+ *
  * A basic bot (`advanced: false`) plays the same, except that it ignores who controls the board:
- * it never goes all in against a leader and does not refuse trades over board control.
+ * it never goes all in against a leader, does not refuse trades over board control, and joins no alliance.
  */
 
 export interface BotMemory {
   advanced: boolean;
+  allies: PlayerId[]; // the other advanced bots, who team up when someone else controls the board
   proposed: Set<string>; // trades already offered, so a bot never repeats itself
   lastTradeTurn: number;
   tradeSeen: Map<string, number>; // own open offers -> turn first seen
 }
 
-export function newBotMemory(opts: { advanced?: boolean } = {}): BotMemory {
-  return { advanced: opts.advanced ?? true, proposed: new Set(), lastTradeTurn: -1, tradeSeen: new Map() };
+export function newBotMemory(opts: { advanced?: boolean; allies?: PlayerId[] } = {}): BotMemory {
+  return { advanced: opts.advanced ?? true, allies: opts.allies ?? [], proposed: new Set(), lastTradeTurn: -1, tradeSeen: new Map() };
 }
 
 // The level of the bot whose move is being worked out. strategyBotAction sets it for the length of
 // one synchronous call, so every valuation below sees the same level without threading it through.
 let advanced = true;
+let allies: PlayerId[] = [];
 
 const GROUPS: ColorGroup[] = ['orange', 'red', 'yellow', 'pink', 'lightBlue', 'green', 'darkBlue', 'brown'];
 // How much a complete set is worth relative to its list price.
@@ -131,6 +137,13 @@ function allIn(s: GameState, me: PlayerId): boolean {
   return !!leader && leader !== me;
 }
 
+/** `pid` is an advanced bot on my side against a board leader that neither of us is. */
+function isAlly(s: GameState, me: PlayerId, pid: PlayerId): boolean {
+  if (!allies.includes(pid) || getPlayer(s, pid)?.bankrupt !== false) return false;
+  const leader = boardLeader(s);
+  return !!leader && leader !== me && leader !== pid;
+}
+
 /** Value to `pid` of gaining property `i`, plus what it denies the opponent who wants it most (all of it against a board leader). */
 function propertyWorth(s: GameState, pid: PlayerId, i: number): { mine: number; block: number } {
   const leader = advanced ? boardLeader(s) : null;
@@ -203,10 +216,12 @@ const groupRank = (g: ColorGroup) => GROUPS.indexOf(g);
 
 export function strategyBotAction(s: GameState, me: PlayerId, mem: BotMemory = newBotMemory()): Action | null {
   advanced = mem.advanced;
+  allies = mem.advanced ? mem.allies : [];
   try {
     return decide(s, me, mem);
   } finally {
     advanced = true;
+    allies = [];
   }
 }
 
@@ -218,12 +233,16 @@ function decide(s: GameState, me: PlayerId, mem: BotMemory): Action | null {
 
   if (s.pending?.type === 'auction') return auctionAction(s, me, legal);
 
-  if (debtsOf(s, me).length) return raiseMoney(s, me, legal);
-
+  // Answer offers first: an ally's rescue can arrive while I am in debt.
   for (const t of s.trades) {
     if (t.to !== me) continue;
     const accept = legal.some((a) => a.type === 'ACCEPT_TRADE' && a.tradeId === t.id) && wouldAccept(s, t);
     return { type: accept ? 'ACCEPT_TRADE' : 'REJECT_TRADE', tradeId: t.id };
+  }
+
+  if (debtsOf(s, me).length) {
+    const rescue = rescueRequest(s, me, mem);
+    return rescue === 'wait' ? null : rescue ?? raiseMoney(s, me, legal);
   }
 
   if (s.pending?.type === 'buyOrAuction' && s.pending.playerId === me) {
@@ -270,6 +289,8 @@ function shouldBuy(s: GameState, me: PlayerId, i: number): boolean {
 function auctionAction(s: GameState, me: PlayerId, legal: Action[]): Action | null {
   const a = s.pending;
   if (a?.type !== 'auction' || !a.bidders.includes(me) || a.highBidder === me) return null;
+  // Let an ally have it cheaply rather than bid them up; the leader is the one to outbid.
+  if (a.highBidder && isAlly(s, me, a.highBidder)) return legal.some((x) => x.type === 'PASS_BID') ? { type: 'PASS_BID' } : null;
   const sp = propertySpace(a.space)!;
   const cash = getPlayer(s, me)!.cash;
   const { mine, block } = propertyWorth(s, me, a.space);
@@ -429,7 +450,8 @@ function tradeGains(s: GameState, from: PlayerId, to: PlayerId, give: Assets, ge
 
 /** Whether `me` takes a trade with `partner` that gains `mine` and gives the partner `theirs`. */
 function acceptable(s: GameState, me: PlayerId, partner: PlayerId, give: Assets, get: Assets, mine: number, theirs: number): boolean {
-  if (mine <= 0) return false;
+  const ally = isAlly(s, me, partner);
+  if (mine <= 0 && !ally) return false;
   const after = ownersOf(s);
   for (const i of give.properties) after[i] = partner;
   for (const i of get.properties) after[i] = me;
@@ -446,12 +468,19 @@ function acceptable(s: GameState, me: PlayerId, partner: PlayerId, give: Assets,
   }
   // Never hand anyone control of most of the board.
   if (controlsBoard(s, after, partner)) return false;
+  // Allies judge a deal by what it does for the alliance, and will give up a little to make it.
+  if (ally) return mine + theirs > 0 && mine >= -Math.max(50, theirs * 0.3);
   // Against a leader, any deal that helps another challenger is worth making.
   if (leader && leader !== me) return true;
   return mine >= theirs * 0.85 - 10;
 }
 
 function wouldAccept(s: GameState, t: TradeOffer): boolean {
+  if (isRescue(s, t, t.to)) {
+    // Keeping an ally's property out of the leader's hands is worth paying over the odds for.
+    const g = tradeGains(s, t.from, t.to, t.give, t.get);
+    return g.to >= -300;
+  }
   const g = tradeGains(s, t.from, t.to, t.give, t.get);
   return acceptable(s, t.to, t.from, t.get, t.give, g.to, g.from);
 }
@@ -491,7 +520,7 @@ function tradeAction(s: GameState, me: PlayerId, mem: BotMemory): Action | null 
         if (tradable(i)) gives.push([i]);
       }
       for (const give of gives) {
-        const min = have + get.length === gs.length ? 40 : 25; // a step towards a set is worth doing for less // a step towards a set is worth doing for less
+        const min = have + get.length === gs.length ? 40 : 25; // a step towards a set is worth doing for less
         deals.push({ other, giveProps: give, getProps: get, giveCards: [], getCards: [], min });
         // Jail cards as sweeteners either way.
         if (meP.jailCards.length) deals.push({ other, giveProps: give, getProps: get, giveCards: [meP.jailCards[0]], getCards: [], min });
@@ -524,17 +553,66 @@ function tradeAction(s: GameState, me: PlayerId, mem: BotMemory): Action | null 
     const getA = assets(getCash, d.getProps, d.getCards);
     if (whyAssetsInvalid(s, me, giveA) || whyAssetsInvalid(s, d.other, getA)) continue;
     const gains = tradeGains(s, me, d.other, giveA, getA);
-    if (gains.from < d.min) continue;
+    const ally = isAlly(s, me, d.other);
+    if ((ally ? gains.from + gains.to : gains.from) < d.min) continue;
     // Only offers both sides would take: I check mine, and judge theirs by the same rules.
     if (!acceptable(s, me, d.other, giveA, getA, gains.from, gains.to)) continue;
     if (!acceptable(s, d.other, me, getA, giveA, gains.to, gains.from)) continue;
     const key = `${d.other}|${[...d.giveProps].sort()}|${[...d.getProps].sort()}|${d.giveCards.length}|${d.getCards.length}|${giveCash}|${getCash}`;
     if (mem.proposed.has(key)) continue;
-    if (!best || gains.from > best.gain) best = { offer: { to: d.other, give: giveA, get: getA }, gain: gains.from, key };
+    const score = ally ? gains.from + gains.to : gains.from;
+    if (!best || score > best.gain) best = { offer: { to: d.other, give: giveA, get: getA }, gain: score, key };
   }
   if (!best) return null;
   mem.proposed.add(best.key);
   return { type: 'PROPOSE_TRADE', offer: best.offer };
+}
+
+// ------------------------------------------------------------------ alliance rescue
+
+/** Debts owed to the board leader, which the leader would collect in full (with everything else) on bankruptcy. */
+function owesLeader(s: GameState, pid: PlayerId): boolean {
+  const leader = boardLeader(s);
+  return !!leader && debtsOf(s, pid).some((d) => d.creditor === leader);
+}
+
+/** An offer between allies from one in debt to the leader: a property for just the cash they are short. */
+function isRescue(s: GameState, t: TradeOffer, me: PlayerId): boolean {
+  const partner = t.from === me ? t.to : t.from;
+  return isAlly(s, me, partner) && owesLeader(s, t.from) && t.get.cash > 0 && !t.give.cash
+    && t.give.properties.length === 1 && !t.get.properties.length;
+}
+
+/**
+ * About to go bankrupt to the leader: before handing them everything, sell one property to an ally
+ * for exactly the cash still missing after mortgaging the rest. Asked once per ally per debt.
+ */
+function rescueRequest(s: GameState, me: PlayerId, mem: BotMemory): Action | 'wait' | null {
+  if (!owesLeader(s, me) || tradesBlocked(s)) return null;
+  if (s.trades.some((t) => t.from === me && isRescue(s, t, me))) return 'wait'; // the ally answers next
+  const debt = totalDebt(s, me);
+  const liquid = liquidationValue(s, me);
+  if (liquid >= debt) return null; // can pay without help
+  for (const ally of allies) {
+    if (!isAlly(s, me, ally) || debtsOf(s, ally).length) continue;
+    const allyCash = getPlayer(s, ally)!.cash;
+    const options = ownedProperties(s, me)
+      .filter((i) => !setHasBuildings(s, i))
+      .map((i) => {
+        const sp = propertySpace(i)!;
+        const lost = s.properties[i].mortgaged ? 0 : sp.mortgage;
+        return { i, cash: Math.ceil((debt - (liquid - lost)) / 10) * 10 };
+      })
+      .filter((o) => o.cash > 0 && o.cash <= allyCash)
+      .sort((x, y) => x.cash - y.cash);
+    for (const o of options) {
+      const key = `rescue|${ally}|${s.turn.number}|${debt}|${o.i}`;
+      if (mem.proposed.has(key)) continue;
+      mem.proposed.add(key);
+      return { type: 'PROPOSE_TRADE', offer: { to: ally, give: { cash: 0, properties: [o.i], jailCards: [] }, get: { cash: o.cash, properties: [], jailCards: [] } } };
+    }
+  }
+  return null;
 }
 
 /** For tests and logs: the strategy's view of who is strongest. */

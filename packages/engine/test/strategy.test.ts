@@ -15,7 +15,8 @@ function play(seed: number, players: number, smart: Set<string>, maxSteps = 2000
     // Everyone gets a chance to act, the players being waited on first.
     const order = [...new Set([...waitingOn(s), ...activePlayers(s).map((p) => p.id)])];
     for (const id of order) {
-      if (!mem.has(id)) mem.set(id, newBotMemory());
+      // Like the server: every other strategy bot is an ally against a board leader.
+      if (!mem.has(id)) mem.set(id, newBotMemory({ allies: [...smart].filter((x) => x !== id) }));
       let a = smart.has(id) ? strategyBotAction(s, id, mem.get(id)) : null;
       // The random bot sometimes picks nothing or a junk trade; let it draw again.
       for (let i = 0; !smart.has(id) && waitingOn(s).includes(id) && i < 20 && (!a || a.type === 'PROPOSE_TRADE'); i++) a = randomBotAction(s, id, rng);
@@ -245,6 +246,58 @@ describe('strategy bot', () => {
         }
         expect(s.winner).toBeTruthy();
       }
+    });
+  });
+
+  describe('advanced bots team up against a board leader', () => {
+    // p2 controls the board; p1 and p3 are advanced bots and allies.
+    const leaderP2 = (s: GameState) => {
+      for (const g of ['lightBlue', 'pink', 'red', 'yellow', 'green'] as const) for (const i of groupSpaces(g)) s.properties[i].ownerId = 'p2';
+    };
+    const ally = (id: string) => newBotMemory({ allies: id === 'p1' ? ['p3'] : ['p1'] });
+
+    it('stay out of an ally\'s auction', () => {
+      const s = setup({}, (s) => {
+        leaderP2(s);
+        s.pending = { type: 'auction', id: 1, space: 39, highBid: 50, highBidder: 'p3', bidders: ['p1', 'p2', 'p3'] };
+      });
+      expect(strategyBotAction(s, 'p1', ally('p1'))?.type).toBe('PASS_BID');
+      expect(strategyBotAction(s, 'p1', newBotMemory())?.type).toBe('BID'); // without the alliance it competes
+    });
+
+    it('rescue an ally who would go bankrupt to the leader', () => {
+      let s = setup({ 39: 'p3', 37: 'p3' }, (s) => {
+        leaderP2(s);
+        const p3 = s.players.find((p) => p.id === 'p3')!;
+        p3.cash = 0;
+        s.debts.push({ debtorId: 'p3', creditor: 'p2', amount: 500, reason: 'rent' });
+      });
+      // p3 has $375 of mortgages against a $500 debt: it asks p1 for the rest in exchange for a property.
+      const ask = strategyBotAction(s, 'p3', ally('p3'));
+      expect(ask?.type).toBe('PROPOSE_TRADE');
+      const r = applyAction(s, { action: ask!, by: 'p3', seq: 1 });
+      if ('error' in r) throw new Error(r.error);
+      s = r.state;
+      expect(strategyBotAction(s, 'p3', ally('p3'))).toBeNull(); // waits for the answer
+      expect(strategyBotAction(s, 'p1', ally('p1'))?.type).toBe('ACCEPT_TRADE');
+      // Without allies, it goes bankrupt instead.
+      const alone = setup({ 39: 'p3', 37: 'p3' }, (s) => {
+        leaderP2(s);
+        s.players.find((p) => p.id === 'p3')!.cash = 0;
+        s.debts.push({ debtorId: 'p3', creditor: 'p2', amount: 500, reason: 'rent' });
+      });
+      expect(strategyBotAction(alone, 'p3', newBotMemory())?.type).toBe('DECLARE_BANKRUPTCY');
+    });
+
+    it('accept a deal that costs a little but helps the alliance more', () => {
+      const [stJames, tennessee, newYork] = groupSpaces('orange');
+      const s = setup({ [stJames]: 'p3', [tennessee]: 'p3', [newYork]: 'p1' }, (s) => {
+        leaderP2(s);
+        // p3 offers $150 for New York Avenue, which completes their orange set.
+        s.trades.push({ id: 't1', from: 'p3', to: 'p1', give: { cash: 150, properties: [], jailCards: [] }, get: { cash: 0, properties: [newYork], jailCards: [] } });
+      });
+      expect(strategyBotAction(s, 'p1', ally('p1'))?.type).toBe('ACCEPT_TRADE');
+      expect(strategyBotAction(s, 'p1', newBotMemory())?.type).toBe('REJECT_TRADE');
     });
   });
 });

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  addToStats, applyAction, createGame, newGameStats, recordTurn, getPlayer, legalActions, newBotMemory, strategyBotAction,
+  addToStats, applyAction, createGame, newGameStats, recordTurn, getPlayer, legalActions, waitingOn, newBotMemory, strategyBotAction,
   type Action, type BotMemory, type Envelope, type GameEvent, type GameSetup, type GameState, type GameStats,
 } from '@monopoly/engine';
 
@@ -291,7 +291,10 @@ export class Room {
     const s = this.game.state;
     for (const seat of this.seats) {
       if (!seat.bot || getPlayer(s, seat.playerId)?.bankrupt !== false) continue;
-      if (!this.botMemory.has(seat.playerId)) this.botMemory.set(seat.playerId, newBotMemory({ advanced: seat.advanced !== false }));
+      if (!this.botMemory.has(seat.playerId)) {
+        const allies = this.seats.filter((x) => x.bot && x.advanced !== false && x.playerId !== seat.playerId).map((x) => x.playerId);
+        this.botMemory.set(seat.playerId, newBotMemory({ advanced: seat.advanced !== false, allies }));
+      }
       const action = strategyBotAction(s, seat.playerId, this.botMemory.get(seat.playerId));
       if (!action) continue;
       const seq = () => this.game!.actions.length + 1;
@@ -304,6 +307,9 @@ export class Room {
       const fallback = order.map((t) => legal.find((a) => a.type === t)).find(Boolean);
       if (fallback && !this.dispatch({ action: fallback, by: seat.playerId, seq: seq() })) return;
     }
+    // Nobody moved but the game waits on a bot (say, one waiting for an ally's answer): look again shortly.
+    const waiting = waitingOn(s);
+    if (this.seats.some((x) => x.bot && waiting.includes(x.playerId))) this.scheduleBots(1000);
   }
 
   private clearBotTimer() {
