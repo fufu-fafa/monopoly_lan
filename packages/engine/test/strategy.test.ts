@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { activePlayers, applyAction, randomBotAction, strategyBotAction, newBotMemory, waitingOn, type BotMemory, type GameState } from '../src';
+import { activePlayers, applyAction, CARDS, groupSpaces, randomBotAction, strategyBotAction, newBotMemory, waitingOn, type BotMemory, type GameState } from '../src';
 import { checkInvariants, mulberry, newGame } from './helpers';
 
 /** Plays a game where players listed in `smart` use the strategy bot and the rest the random bot. */
@@ -67,4 +67,76 @@ describe('strategy bot', () => {
     expect(done).toBeGreaterThan(N * 0.8);
     expect(trades).toBeGreaterThan(0);
   }, 300_000);
+
+  // Sets up a fresh 3-player game on p1's turn, before the roll.
+  const setup = (own: Record<number, string>, tweak?: (s: GameState) => void) => {
+    const s = newGame(3, 5);
+    s.turn.playerId = 'p1';
+    for (const [i, owner] of Object.entries(own)) s.properties[Number(i)].ownerId = owner;
+    tweak?.(s);
+    return s;
+  };
+  const proposal = (s: GameState) => {
+    const a = strategyBotAction(s, 'p1', newBotMemory());
+    return a?.type === 'PROPOSE_TRADE' ? a.offer : null;
+  };
+  const giveCard = (s: GameState, pid: string) => {
+    const id = CARDS.find((c) => c.effect.type === 'getOutOfJailFree')!.id;
+    s.decks.chance = s.decks.chance.filter((c) => c !== id);
+    s.decks.chest = s.decks.chest.filter((c) => c !== id);
+    s.players.find((p) => p.id === pid)!.jailCards.push(id);
+    return id;
+  };
+  const [stJames, tennessee, newYork] = groupSpaces('orange');
+  // Most of the board owned, so the stage is past the opening.
+  const filler = (s: GameState) => {
+    for (const g of ['brown', 'lightBlue', 'pink', 'yellow', 'green', 'darkBlue'] as const) for (const i of groupSpaces(g)) s.properties[i].ownerId ??= 'p3';
+  };
+
+  it('trades for a piece of a set split among three players', () => {
+    const s = setup({ [stJames]: 'p1', [tennessee]: 'p2', [newYork]: 'p3' }, filler);
+    const offer = proposal(s);
+    expect(offer).not.toBeNull();
+    expect(offer!.get.properties.some((i) => i === tennessee || i === newYork)).toBe(true);
+  });
+
+  it('trades for a piece of a set whose last piece the bank still holds', () => {
+    const s = setup({ [stJames]: 'p1', [tennessee]: 'p2' }, filler);
+    const offer = proposal(s);
+    expect(offer?.to).toBe('p2');
+    expect(offer!.get.properties).toEqual([tennessee]);
+  });
+
+  it('buys a Get Out of Jail Free card while stuck in jail early', () => {
+    const s = setup({}, (s) => {
+      const me = s.players.find((p) => p.id === 'p1')!;
+      me.inJail = true;
+      me.position = 10;
+      giveCard(s, 'p2');
+    });
+    const offer = proposal(s);
+    expect(offer?.to).toBe('p2');
+    expect(offer!.get.jailCards.length).toBe(1);
+    expect(offer!.give.cash).toBeGreaterThan(0);
+  });
+
+  it('sells its Get Out of Jail Free card when short of cash', () => {
+    const s = setup({}, (s) => {
+      giveCard(s, 'p1');
+      s.players.find((p) => p.id === 'p1')!.cash = 40;
+    });
+    const offer = proposal(s);
+    expect(offer!.give.jailCards.length).toBe(1);
+    expect(offer!.get.cash).toBeGreaterThan(0);
+  });
+
+  it('accepts a fair cash offer for its jail card and rejects a lowball', () => {
+    for (const [cash, accept] of [[60, true], [5, false]] as const) {
+      const s = setup({}, (s) => {
+        const id = giveCard(s, 'p2');
+        s.trades.push({ id: 't1', from: 'p1', to: 'p2', give: { cash, properties: [], jailCards: [] }, get: { cash: 0, properties: [], jailCards: [id] } });
+      });
+      expect(strategyBotAction(s, 'p2', newBotMemory())?.type).toBe(accept ? 'ACCEPT_TRADE' : 'REJECT_TRADE');
+    }
+  });
 });

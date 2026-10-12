@@ -46,6 +46,23 @@ function ownersOf(s: GameState): Owners {
   return o;
 }
 
+/**
+ * How much a street is worth relative to its price, by progress towards its set. A missing piece the
+ * bank still holds can be landed on or won at auction; one held by an opponent needs a trade.
+ */
+function setMultiplier(owners: Owners, pid: PlayerId, g: ColorGroup): number {
+  const group = groupSpaces(g);
+  const n = group.filter((i) => owners[i] === pid).length;
+  if (n === group.length) return SET_WEIGHT[g];
+  const missing = group.filter((i) => owners[i] !== pid);
+  const unowned = missing.filter((i) => owners[i] == null).length;
+  const holders = new Set(missing.map((i) => owners[i]).filter((o) => o != null)).size;
+  const extra = SET_WEIGHT[g] - 1;
+  // Each held piece is progress; it counts for more the fewer opponents stand in the way.
+  const progress = (n / group.length) * (unowned === missing.length ? 0.45 : holders === 1 ? 0.3 : 0.15);
+  return 1 + extra * progress * (n >= 2 || group.length === 2 ? 1 : 0.5);
+}
+
 /** What a player's property is worth to them under a (possibly hypothetical) ownership map. */
 function holdingsValue(s: GameState, owners: Owners, pid: PlayerId): number {
   let v = 0;
@@ -62,10 +79,7 @@ function holdingsValue(s: GameState, owners: Owners, pid: PlayerId): number {
       else utils++;
       continue;
     }
-    const group = groupSpaces(sp.group);
-    const n = group.filter((g) => owners[g] === pid).length;
-    const mult = n === group.length ? SET_WEIGHT[sp.group] : n === group.length - 1 ? 1.15 : 1;
-    v += sp.price * mult + prop.buildings * sp.houseCost;
+    v += sp.price * setMultiplier(owners, pid, sp.group) + prop.buildings * sp.houseCost;
   }
   return v + RAIL_VALUE[rails] + UTIL_VALUE[utils];
 }
@@ -298,6 +312,16 @@ function stayInJail(s: GameState, me: PlayerId): boolean {
 
 // ------------------------------------------------------------------ trades
 
+/** A Get Out of Jail Free card saves the fine and a turn early on; once staying in jail is good it is worth little. */
+function jailCardValue(s: GameState, pid: PlayerId): number {
+  const p = getPlayer(s, pid)!;
+  let v = stayInJail(s, pid) ? 15 : unownedCount(s) >= 6 ? 60 : 40;
+  if (p.inJail && !stayInJail(s, pid)) v += 30;
+  if (p.cash < cushion(s, pid)) v *= 0.6; // a luxury when you cannot cover a bad landing
+  // Each extra card is worth less than the first.
+  return p.jailCards.length ? Math.round(v * 0.6) : v;
+}
+
 function tradeGains(s: GameState, from: PlayerId, to: PlayerId, give: Assets, get: Assets) {
   const owners = ownersOf(s);
   const after = { ...owners };
@@ -306,16 +330,17 @@ function tradeGains(s: GameState, from: PlayerId, to: PlayerId, give: Assets, ge
   const fee = (props: number[]) => props
     .filter((i) => s.properties[i].mortgaged)
     .reduce((n, i) => n + Math.ceil(propertySpace(i)!.mortgage * s.rules.mortgageInterest), 0);
-  const side = (pid: PlayerId, cashDelta: number, received: number[]) => {
+  const side = (pid: PlayerId, cashDelta: number, received: number[], cardsIn: number, cardsOut: number) => {
     const cashAfter = getPlayer(s, pid)!.cash + cashDelta - fee(received);
-    const gain = holdingsValue(s, after, pid) - holdingsValue(s, owners, pid) + cashDelta - fee(received);
+    const cards = (cardsIn - cardsOut) * jailCardValue(s, pid);
+    const gain = holdingsValue(s, after, pid) - holdingsValue(s, owners, pid) + cashDelta - fee(received) + cards;
     // Running yourself dry to make a deal is a cost too.
     const short = Math.max(0, cushion(s, pid) - cashAfter);
     return gain - short * 0.5;
   };
   return {
-    from: side(from, get.cash - give.cash, get.properties),
-    to: side(to, give.cash - get.cash, give.properties),
+    from: side(from, get.cash - give.cash, get.properties, get.jailCards.length, give.jailCards.length),
+    to: side(to, give.cash - get.cash, give.properties, give.jailCards.length, get.jailCards.length),
   };
 }
 
@@ -326,58 +351,78 @@ function wouldAccept(s: GameState, t: TradeOffer): boolean {
   return acceptable(g.to, g.from);
 }
 
+interface Deal { other: PlayerId; giveProps: number[]; getProps: number[]; giveCards: string[]; getCards: string[]; min: number }
+
 function tradeAction(s: GameState, me: PlayerId, mem: BotMemory): Action | null {
   if (tradesBlocked(s) || s.trades.some((t) => t.from === me) || mem.lastTradeTurn === s.turn.number) return null;
   mem.lastTradeTurn = s.turn.number;
   const owners = ownersOf(s);
-  const myCash = getPlayer(s, me)!.cash;
+  const meP = getPlayer(s, me)!;
   const tradable = (i: number) => !setHasBuildings(s, i);
-  let best: { offer: Omit<TradeOffer, 'id' | 'from'>; gain: number; key: string } | null = null;
+  const deals: Deal[] = [];
 
   for (const g of GROUPS) {
     const gs = groupSpaces(g);
-    const missing = gs.filter((i) => owners[i] !== me);
-    const have = gs.length - missing.length;
-    if (!have || !missing.length || missing.length > have) continue;
-    const holders = new Set(missing.map((i) => owners[i]));
-    if (holders.size !== 1 || holders.has(null)) continue;
-    const other = [...holders][0]!;
-    if (!missing.every(tradable)) continue;
-    const otherP = getPlayer(s, other)!;
+    const have = gs.filter((i) => owners[i] === me).length;
+    if (!have || have === gs.length) continue;
+    // Ask one opponent at a time for their pieces of the set. This also works when the set is split
+    // among several players or some pieces are still with the bank: each deal is a step towards it.
+    for (const other of new Set(gs.map((i) => owners[i]).filter((o): o is PlayerId => !!o && o !== me))) {
+      const get = gs.filter((i) => owners[i] === other);
+      if (!get.every(tradable)) continue;
+      const theirCards = getPlayer(s, other)!.jailCards;
+      // What to put on the table: cash only, the pieces they need for one of their sets, or one loose property.
+      const gives: number[][] = [[]];
+      for (const h of GROUPS) {
+        if (h === g) continue;
+        const hs = groupSpaces(h);
+        const myIn = hs.filter((i) => owners[i] === me);
+        const theirs = hs.filter((i) => owners[i] === other);
+        if (myIn.length && theirs.length && myIn.every(tradable)) gives.push(myIn);
+      }
+      for (const i of ownedProperties(s, me)) {
+        const sp = propertySpace(i)!;
+        if (sp.kind === 'street' && (sp.group === g || ownsFullSet(s, me, sp.group))) continue;
+        if (tradable(i)) gives.push([i]);
+      }
+      for (const give of gives) {
+        const min = have + get.length === gs.length ? 40 : 25; // a step towards a set is worth doing for less
+        deals.push({ other, giveProps: give, getProps: get, giveCards: [], getCards: [], min });
+        // Jail cards as sweeteners either way.
+        if (meP.jailCards.length) deals.push({ other, giveProps: give, getProps: get, giveCards: [meP.jailCards[0]], getCards: [], min });
+        if (theirCards.length) deals.push({ other, giveProps: give, getProps: get, giveCards: [], getCards: [theirCards[0]], min });
+      }
+    }
+  }
 
-    // What to put on the table: nothing (cash only), the pieces they need for one of their sets, or one loose property.
-    const gives: number[][] = [[]];
-    for (const h of GROUPS) {
-      if (h === g) continue;
-      const hs = groupSpaces(h);
-      const myIn = hs.filter((i) => owners[i] === me);
-      const theirs = hs.filter((i) => owners[i] === other);
-      if (myIn.length && theirs.length && myIn.length + theirs.length === hs.length && myIn.every(tradable)) gives.push(myIn);
-    }
-    for (const i of ownedProperties(s, me)) {
-      const sp = propertySpace(i)!;
-      if (sp.kind === 'street' && (sp.group === g || ownsFullSet(s, me, sp.group))) continue;
-      if (tradable(i)) gives.push([i]);
-    }
+  // Jail cards on their own: sell one when cash is short, buy one when it would get you out early.
+  for (const o of activePlayers(s)) {
+    if (o.id === me) continue;
+    if (meP.jailCards.length) deals.push({ other: o.id, giveProps: [], getProps: [], giveCards: [meP.jailCards[0]], getCards: [], min: 5 });
+    if (o.jailCards.length) deals.push({ other: o.id, giveProps: [], getProps: [], giveCards: [], getCards: [o.jailCards[0]], min: 5 });
+  }
 
-    for (const give of gives) {
-      const get = missing;
-      const g0 = tradeGains(s, me, other, { cash: 0, properties: give, jailCards: [] }, { cash: 0, properties: get, jailCards: [] });
-      const d = (g0.from - g0.to) / 2;
-      let giveCash = 0;
-      let getCash = 0;
-      if (d > 0) giveCash = Math.ceil((d + 10) / 10) * 10;
-      else if (d < -20) getCash = Math.floor((-d - 10) / 10) * 10;
-      if (giveCash > myCash || getCash > otherP.cash) continue;
-      const giveA: Assets = { cash: giveCash, properties: give, jailCards: [] };
-      const getA: Assets = { cash: getCash, properties: get, jailCards: [] };
-      if (whyAssetsInvalid(s, me, giveA) || whyAssetsInvalid(s, other, getA)) continue;
-      const gains = tradeGains(s, me, other, giveA, getA);
-      if (gains.from < 40 || !acceptable(gains.to, gains.from)) continue;
-      const key = `${other}|${[...give].sort()}|${[...get].sort()}|${giveCash}|${getCash}`;
-      if (mem.proposed.has(key)) continue;
-      if (!best || gains.from > best.gain) best = { offer: { to: other, give: giveA, get: getA }, gain: gains.from, key };
-    }
+  let best: { offer: Omit<TradeOffer, 'id' | 'from'>; gain: number; key: string } | null = null;
+  for (const d of deals) {
+    const otherP = getPlayer(s, d.other)!;
+    const assets = (cash: number, properties: number[], jailCards: string[]): Assets => ({ cash, properties, jailCards });
+    const g0 = tradeGains(s, me, d.other, assets(0, d.giveProps, d.giveCards), assets(0, d.getProps, d.getCards));
+    // Balance with cash so both sides gain about the same.
+    const diff = (g0.from - g0.to) / 2;
+    const step = d.getProps.length || d.giveProps.length ? 10 : 5;
+    let giveCash = 0;
+    let getCash = 0;
+    if (diff > 0) giveCash = Math.ceil((diff + step) / step) * step;
+    else if (diff < -2 * step) getCash = Math.floor((-diff - step) / step) * step;
+    if (giveCash > meP.cash || getCash > otherP.cash) continue;
+    const giveA = assets(giveCash, d.giveProps, d.giveCards);
+    const getA = assets(getCash, d.getProps, d.getCards);
+    if (whyAssetsInvalid(s, me, giveA) || whyAssetsInvalid(s, d.other, getA)) continue;
+    const gains = tradeGains(s, me, d.other, giveA, getA);
+    if (gains.from < d.min || !acceptable(gains.to, gains.from)) continue;
+    const key = `${d.other}|${[...d.giveProps].sort()}|${[...d.getProps].sort()}|${d.giveCards.length}|${d.getCards.length}|${giveCash}|${getCash}`;
+    if (mem.proposed.has(key)) continue;
+    if (!best || gains.from > best.gain) best = { offer: { to: d.other, give: giveA, get: getA }, gain: gains.from, key };
   }
   if (!best) return null;
   mem.proposed.add(best.key);

@@ -26,7 +26,14 @@ function assert(cond: unknown, msg: string): asserts cond {
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 async function until(cond: () => boolean, ms: number, what: string) {
   const end = Date.now() + ms;
-  while (!cond()) { if (Date.now() > end) assert(false, `timed out waiting for ${what}`); await wait(20); }
+  while (!cond()) {
+    if (Date.now() > end) {
+      const s = kp.state;
+      if (s) console.error(`seq ${kp.seq}, waiting on ${waitingOn(s)}, pending ${JSON.stringify(s.pending)}, debts ${JSON.stringify(s.debts)}, trades ${s.trades.length}, log: ${s.log.slice(-5).join(' | ')}`);
+      assert(false, `timed out waiting for ${what}`);
+    }
+    await wait(20);
+  }
 }
 
 let rngState = 777;
@@ -61,8 +68,10 @@ class Person {
       const a = randomBotAction(s, this.me, rng);
       if (a?.type === 'PROPOSE_TRADE') continue;
       if (a) this.send({ type: 'action', action: a, clientSeq: 1 });
-      return;
+      if (a) return;
     }
+    // The random player sometimes picks nothing; try again shortly so the game never waits forever.
+    setTimeout(() => this.maybeAct(), 50);
   }
 }
 
