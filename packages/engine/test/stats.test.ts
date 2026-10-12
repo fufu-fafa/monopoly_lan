@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addToStats, applyAction, newGameStats, strategyBotAction, type GameState } from '../src';
+import { addToStats, applyAction, HISTORY_MAX, newGameStats, recordTurn, strategyBotAction, type GameState } from '../src';
 import { newGame } from './helpers';
 
 describe('statistics', () => {
@@ -19,7 +19,7 @@ describe('statistics', () => {
       const r = applyAction(s, { action, by, seq: step + 1 });
       if ('error' in r) throw new Error(r.error);
       s = r.state;
-      addToStats(stats, r.events);
+      recordTurn(addToStats(stats, r.events), s);
       for (const e of r.events) if (e.type === 'paid' && e.reason.startsWith('rent on ') && e.to !== 'bank') rentFromEvents += e.amount;
     }
     const all = Object.values(stats.players);
@@ -29,6 +29,13 @@ describe('statistics', () => {
     expect(sum('rentReceived')).toBe(rentFromEvents);
     expect(sum('rentPaid')).toBe(rentFromEvents);
     expect(sum('propertiesBought')).toBeGreaterThan(0);
+    // The graph history: one point per turn, thinned but in order, ending on the current turn.
+    expect(stats.history.length).toBeGreaterThan(10);
+    expect(stats.history.length).toBeLessThanOrEqual(HISTORY_MAX);
+    expect(stats.history.every((h, i, a) => i === 0 || h.turn > a[i - 1].turn)).toBe(true);
+    expect(stats.history[stats.history.length - 1].turn).toBe(s.turn.number);
+    const last = stats.history[stats.history.length - 1];
+    for (const p of s.players) expect(last.rentPaid[p.id]).toBe(stats.players[p.id]?.rentPaid ?? 0);
     expect(Object.values(stats.landings).reduce((a, b) => a + b, 0)).toBeGreaterThanOrEqual(sum('rolls') - sum('timesInJail'));
   });
 });

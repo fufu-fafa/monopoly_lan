@@ -7,6 +7,7 @@ import {
 import type { Connection } from '../net';
 import type { Speed } from '../animator';
 import { Board } from './Board';
+import { StatsChart } from './StatsChart';
 import { TradeBuilder, describeAssets } from './Trade';
 
 const DIE = ['', '⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
@@ -452,6 +453,7 @@ function Stats({ state, stats }: { state: GameState; stats: GameStats }) {
   return (
     <div className="stats">
       <h3>Statistics <span className="muted small">turn {state.turn.number}</span></h3>
+      <StatsChart state={state} history={stats.history ?? []} />
       <div className="stats-scroll">
         <table className="stats-table">
           <thead>

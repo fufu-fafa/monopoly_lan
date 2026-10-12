@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  addToStats, applyAction, createGame, newGameStats, getPlayer, legalActions, newBotMemory, strategyBotAction,
+  addToStats, applyAction, createGame, newGameStats, recordTurn, getPlayer, legalActions, newBotMemory, strategyBotAction,
   type Action, type BotMemory, type Envelope, type GameEvent, type GameSetup, type GameState, type GameStats,
 } from '@monopoly/engine';
 
@@ -213,7 +213,8 @@ export class Room {
       rules: { startingCash: this.options.startingCash, freeParkingJackpot: this.options.freeParkingJackpot },
     };
     const id = new Date().toISOString().replace(/[:.]/g, '-');
-    this.game = { id, seed, setup, actions: [], state: createGame(setup, seed), stats: newGameStats() };
+    const state = createGame(setup, seed);
+    this.game = { id, seed, setup, actions: [], state, stats: recordTurn(newGameStats(), state) };
     this.save();
     this.broadcastLobby();
     this.broadcastState([]);
@@ -254,7 +255,7 @@ export class Room {
     if ('error' in result) return result.error;
     this.game.state = result.state;
     this.game.actions.push(env);
-    addToStats(this.game.stats, result.events);
+    recordTurn(addToStats(this.game.stats, result.events), result.state);
     this.save();
     this.syncAuctionTimer();
     this.broadcastState(result.events);
@@ -412,13 +413,13 @@ export class Room {
       }
       if (saved.finished) continue;
       let state = createGame(saved.setup, saved.seed);
-      const stats = newGameStats();
+      const stats = recordTurn(newGameStats(), state);
       let ok = true;
       for (const env of saved.actions) {
         const r = applyAction(state, env);
         if ('error' in r) { ok = false; break; }
         state = r.state;
-        addToStats(stats, r.events);
+        recordTurn(addToStats(stats, r.events), state);
       }
       if (!ok) continue;
       this.seats = saved.seats;
