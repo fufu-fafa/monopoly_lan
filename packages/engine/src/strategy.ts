@@ -342,7 +342,9 @@ function buildAction(s: GameState, me: PlayerId, legal: Action[]): Action | null
   const reserve = cushion(s, me);
   // Never trade four houses for a hotel while an opponent has a set that needs houses.
   // All in, the highest rent matters more than starving anyone of houses.
-  const opponentSet = !allIn(s, me) && activePlayers(s).some((o) => o.id !== me && GROUPS.some((g) => ownsFullSet(s, o.id, g)));
+  // With unlimited houses there is nothing to starve anyone of, so hotels are always fair game.
+  const unlimited = s.rules.houseSupply >= 88;
+  const opponentSet = !allIn(s, me) && !unlimited && activePlayers(s).some((o) => o.id !== me && GROUPS.some((g) => ownsFullSet(s, o.id, g)));
 
   const options = builds.map((a) => {
     const sp = propertySpace(a.space)!;

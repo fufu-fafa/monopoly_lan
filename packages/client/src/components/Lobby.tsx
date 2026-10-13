@@ -126,6 +126,10 @@ export function Lobby({ conn }: { conn: Connection }) {
           Free Parking jackpot (taxes and fines collect in the middle)
         </label>
         <label className="row">
+          <input type="checkbox" disabled={!isAdmin} checked={!!o.unlimitedHouses} onChange={(e) => send({ type: 'setOptions', options: { unlimitedHouses: e.target.checked } })} />
+          Unlimited houses and hotels (the bank never runs out)
+        </label>
+        <label className="row">
           <input type="checkbox" disabled={!isAdmin} checked={o.shuffleOrder} onChange={(e) => send({ type: 'setOptions', options: { shuffleOrder: e.target.checked } })} />
           Random turn order (otherwise in joining order)
         </label>

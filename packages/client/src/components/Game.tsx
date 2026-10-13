@@ -38,6 +38,7 @@ export function Game({ conn }: { conn: Connection }) {
   const [selected, setSelected] = useState<number | null>(null);
   const [tab, setTab] = useState<'players' | 'manage' | 'trades' | 'log'>('players');
   const [trade, setTrade] = useState<{ to?: string; give?: Assets; get?: Assets } | null>(null);
+  const [resultClosed, setResultClosed] = useState(false);
   const narrow = useNarrow();
   if (!state) return null;
 
@@ -103,6 +104,12 @@ export function Game({ conn }: { conn: Connection }) {
             Leave game
           </button>
         )}{' '}
+        {state.winner && resultClosed && (
+          <div className="row">
+            <button onClick={() => setResultClosed(false)}>Show the winner</button>
+            {isAdmin && <button className="primary" onClick={() => send({ type: 'endGame' })}>Back to the lobby</button>}
+          </div>
+        )}
         {isAdmin && !state.winner && (
           <button className="link danger" onClick={() => confirm('End this game for everyone and go back to the lobby?') && send({ type: 'endGame' })}>
             End game (admin)
@@ -118,7 +125,10 @@ export function Game({ conn }: { conn: Connection }) {
       {incoming > 0 && tab !== 'trades' && meP && (
         <button className="trade-alert" onClick={() => setTab('trades')}>You have {incoming} trade offer{incoming > 1 ? 's' : ''}</button>
       )}
-      {state.winner && <GameOver state={state} isAdmin={isAdmin} onLobby={() => send({ type: 'endGame' })} />}
+      {state.winner && !resultClosed && (
+        <GameOver state={state} isAdmin={isAdmin} onLobby={() => send({ type: 'endGame' })}
+          onLog={() => { setResultClosed(true); setTab('log'); }} />
+      )}
     </div>
   );
 }
@@ -327,13 +337,15 @@ function Players({ state, presence, me, isAdmin, advancedBots, canGive, onGive, 
               {p.jailCards.length > 0 && ` 🎟 ${p.jailCards.length}`}
               {!p.bankrupt && ` · on ${space(p.position).name}`}
             </div>
-            {canGive && !p.bankrupt && !state.winner && (
-              <button className="link small" onClick={() => onGive(p)}>Give money</button>
-            )}
-            {isAdmin && id !== me && !p.bankrupt && !state.winner && (
-              <button className="link danger small" disabled={state.pending?.type === 'auction'} onClick={() => onRemove(p)}>
-                Remove from game
-              </button>
+            {isAdmin && !p.bankrupt && !state.winner && (canGive || id !== me) && (
+              <div className="row">
+                {canGive && <button className="small" onClick={() => onGive(p)}>Give money</button>}
+                {id !== me && (
+                  <button className="danger small" disabled={state.pending?.type === 'auction'} onClick={() => onRemove(p)}>
+                    Remove from game
+                  </button>
+                )}
+              </div>
             )}
             {/* One row per colour set, then railroads and utilities on rows of their own. */}
             <div className="chips">
@@ -531,14 +543,18 @@ function SpaceDetail({ state, index, me, act, onClose }: { state: GameState; ind
   );
 }
 
-function GameOver({ state, isAdmin, onLobby }: { state: GameState; isAdmin: boolean; onLobby: () => void }) {
+function GameOver({ state, isAdmin, onLobby, onLog }: { state: GameState; isAdmin: boolean; onLobby: () => void; onLog: () => void }) {
   const winner = state.players.find((p) => p.id === state.winner)!;
   return (
     <div className="modal-bg">
       <div className="modal">
         <h2>🏆 {winner.name} wins!</h2>
         <p>Final cash ${winner.cash}, net worth ${netWorth(state, winner.id)} after {state.turn.number} turns.</p>
-        {isAdmin ? <button className="primary" onClick={onLobby}>Back to the lobby</button> : <p className="muted">The admin can start a new game.</p>}
+        {!isAdmin && <p className="muted">The admin can start a new game.</p>}
+        <div className="row">
+          <button onClick={onLog}>View the log</button>
+          {isAdmin && <button className="primary" onClick={onLobby}>Back to the lobby</button>}
+        </div>
       </div>
     </div>
   );

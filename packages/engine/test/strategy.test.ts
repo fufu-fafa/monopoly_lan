@@ -169,6 +169,18 @@ describe('strategy bot', () => {
       expect(strategyBotAction(poor, 'p1', newBotMemory())?.type).toBe('BUILD');
     });
 
+    it('builds hotels when the bank has unlimited houses', () => {
+      const green = groupSpaces('green');
+      const unlimited = (s: GameState) => {
+        withOrange(4, 1000)(s);
+        s.bank.houses += 999 - s.rules.houseSupply;
+        s.bank.hotels += 999 - s.rules.hotelSupply;
+        s.rules.houseSupply = s.rules.hotelSupply = 999;
+      };
+      const s = setup({ [green[0]]: 'p2', [green[1]]: 'p2', [green[2]]: 'p2' }, unlimited);
+      expect(strategyBotAction(s, 'p1', newBotMemory())?.type).toBe('BUILD');
+    });
+
     it('mortgages loose property to pay for houses', () => {
       const s = setup({ 39: 'p1', 28: 'p1' }, (s) => { bigP2(s); withOrange(2, 20)(s); });
       const a = strategyBotAction(s, 'p1', newBotMemory());

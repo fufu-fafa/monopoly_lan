@@ -5,7 +5,7 @@ import { useAnimator, type CardShown, type StateMsg } from './animator';
 export type { CardShown } from './animator';
 
 export interface SeatView { playerId: string; name: string; token: string; color: string; bot?: boolean; advanced?: boolean; watching?: boolean }
-export interface LobbyOptions { startingCash: number; freeParkingJackpot: boolean; shuffleOrder: boolean }
+export interface LobbyOptions { startingCash: number; freeParkingJackpot: boolean; shuffleOrder: boolean; unlimitedHouses?: boolean }
 export interface LobbyView {
   seats: SeatView[];
   adminId: string | null;

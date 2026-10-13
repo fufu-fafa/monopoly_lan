@@ -92,10 +92,10 @@ assert(bots[1].errors.includes('Only the room admin can start'), 'non-admin star
 
 // Hold the bots still until the out-of-turn check below is done, so the turn cannot move under it.
 paused = true;
-bots[0].send({ type: 'setOptions', options: { freeParkingJackpot: true, startingCash: 500 } });
+bots[0].send({ type: 'setOptions', options: { freeParkingJackpot: true, startingCash: 500, unlimitedHouses: true } });
 bots[0].send({ type: 'startGame' });
 await until(() => bots.every((b) => b.state), 2000, 'game start');
-assert(bots[0].state!.rules.freeParkingJackpot && bots[0].state!.rules.startingCash === 500, 'options applied');
+assert(bots[0].state!.rules.freeParkingJackpot && bots[0].state!.rules.startingCash === 500, 'options applied'); assert(bots[0].state!.bank.houses === 999 && bots[0].state!.rules.hotelSupply === 999, 'unlimited houses');
 console.log('Game started; turn order', bots[0].state!.turnOrder.join(', '));
 
 // Impersonation is impossible: the server uses the socket's seat, not the message.

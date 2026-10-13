@@ -16,7 +16,10 @@ const TOKENS = ['🎩', '🚗', '🐕', '🚢', '👢', '🐈', '🦖', '🦆'];
 const COLORS = ['#e53935', '#1e88e5', '#43a047', '#fb8c00', '#8e24aa', '#00acc1', '#6d4c41', '#d81b60'];
 
 export interface Seat { playerId: string; name: string; token: string; color: string; seatToken: string; bot?: boolean; advanced?: boolean; watching?: boolean }
-export interface LobbyOptions { startingCash: number; freeParkingJackpot: boolean; shuffleOrder: boolean }
+export interface LobbyOptions { startingCash: number; freeParkingJackpot: boolean; shuffleOrder: boolean; unlimitedHouses: boolean }
+
+/** Unlimited houses: far more than the 88 houses and 22 hotels the board can hold. */
+const UNLIMITED_SUPPLY = 999;
 
 export interface Client {
   send(msg: unknown): void;
@@ -53,7 +56,7 @@ function animationMs(events: GameEvent[]): number {
 export class Room {
   seats: Seat[] = [];
   adminId: string | null = null;
-  options: LobbyOptions = { startingCash: 1500, freeParkingJackpot: false, shuffleOrder: true };
+  options: LobbyOptions = { startingCash: 1500, freeParkingJackpot: false, shuffleOrder: true, unlimitedHouses: false };
   clients = new Set<Client>();
   game: { id: string; seed: number; setup: GameSetup; actions: Envelope[]; state: GameState; stats: GameStats } | null = null;
   private nextPlayer = 1;
@@ -207,6 +210,7 @@ export class Room {
     if (Number.isInteger(cash) && cash >= 100 && cash <= 10_000) this.options.startingCash = cash;
     if (typeof o.freeParkingJackpot === 'boolean') this.options.freeParkingJackpot = o.freeParkingJackpot;
     if (typeof o.shuffleOrder === 'boolean') this.options.shuffleOrder = o.shuffleOrder;
+    if (typeof o.unlimitedHouses === 'boolean') this.options.unlimitedHouses = o.unlimitedHouses;
     this.broadcastLobby();
   }
 
@@ -222,7 +226,11 @@ export class Room {
     }
     const setup: GameSetup = {
       players: order,
-      rules: { startingCash: this.options.startingCash, freeParkingJackpot: this.options.freeParkingJackpot },
+      rules: {
+        startingCash: this.options.startingCash,
+        freeParkingJackpot: this.options.freeParkingJackpot,
+        ...(this.options.unlimitedHouses && { houseSupply: UNLIMITED_SUPPLY, hotelSupply: UNLIMITED_SUPPLY }),
+      },
     };
     const id = new Date().toISOString().replace(/[:.]/g, '-');
     const state = createGame(setup, seed);
@@ -453,7 +461,7 @@ export class Room {
       if (!ok) continue;
       this.seats = saved.seats;
       this.adminId = saved.adminId;
-      this.options = saved.options;
+      this.options = { ...this.options, ...saved.options };
       this.nextPlayer = 1 + Math.max(0, ...saved.seats.map((s) => Number(s.playerId.slice(1)) || 0));
       this.game = { id: saved.id, seed: saved.seed, setup: saved.setup, actions: saved.actions, state, stats };
       this.syncAuctionTimer();
