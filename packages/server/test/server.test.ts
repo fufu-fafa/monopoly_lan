@@ -64,11 +64,12 @@ class Bot {
     // Trades are covered by the engine tests; here bots just play the turn flow.
     for (let i = 0; i < 20; i++) {
       const a = randomBotAction(s, this.me, rng);
-      if (a?.type === 'PROPOSE_TRADE') continue;
-      if (a) this.send({ type: 'action', action: a, clientSeq: 1 });
+      // The random player sometimes picks nothing (say, a player in debt who declines bankruptcy): draw again.
+      if (!a || a.type === 'PROPOSE_TRADE') continue;
+      this.send({ type: 'action', action: a, clientSeq: 1 });
       return;
     }
-    // Only trade offers came up this time; try again rather than stalling the game.
+    // Nothing usable came up this time; try again rather than stalling the game.
     setTimeout(() => this.maybeAct(), 20);
   }
 }
