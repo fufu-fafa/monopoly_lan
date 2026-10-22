@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import {
   BOARD, GROUP_COLORS, allianceChampion, boardLeader, legalActions, netWorth, ownedProperties, propertySpace, rentFor, space, totalDebt,
   unmortgageCost, waitingOn, whyCannotBuild, whyCannotMortgage, whyCannotSell, whyCannotUnmortgage,
@@ -10,7 +10,6 @@ import { Board } from './Board';
 import { StatsChart } from './StatsChart';
 import { TradeBuilder, describeAssets } from './Trade';
 
-const DIE = ['', '⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
 
 function useNarrow() {
   const query = '(max-width: 900px)';
@@ -179,19 +178,32 @@ function Center({ conn, me, children }: { conn: Connection; me: Player | null; c
   );
 }
 
+// Which pips are lit on a 3x3 grid (row-major) for each face value.
+const PIPS: Record<number, number[]> = { 1: [4], 2: [2, 6], 3: [2, 4, 6], 4: [0, 2, 6, 8], 5: [0, 2, 4, 6, 8], 6: [0, 2, 3, 5, 6, 8] };
+// Cube faces (opposites sum to 7) and the cube rotation that turns each one to the viewer.
+const FACES = [1, 6, 3, 4, 2, 5];
+const SHOW: Record<number, string> = {
+  1: 'rotateX(0deg) rotateY(0deg)', 6: 'rotateX(0deg) rotateY(180deg)',
+  3: 'rotateX(0deg) rotateY(-90deg)', 4: 'rotateX(0deg) rotateY(90deg)',
+  2: 'rotateX(-90deg) rotateY(0deg)', 5: 'rotateX(90deg) rotateY(0deg)',
+};
+
 function Dice({ values, rolling }: { values: [number, number] | null; rolling: boolean }) {
-  const [faces, setFaces] = useState<[number, number]>([1, 1]);
-  useEffect(() => {
-    if (!rolling) return;
-    const t = setInterval(() => setFaces([1 + Math.floor(Math.random() * 6), 1 + Math.floor(Math.random() * 6)]), 80);
-    return () => clearInterval(t);
-  }, [rolling]);
   if (!values) return null;
-  const shown = rolling ? faces : values;
   return (
     <div className={`dice ${rolling ? 'rolling' : 'landed'}`} aria-label={rolling ? 'Rolling dice' : `Dice ${values.join(' and ')}`}>
-      <span className="die">{DIE[shown[0]]}</span>
-      <span className="die">{DIE[shown[1]]}</span>
+      {values.map((v, i) => (
+        <div key={i} className="die">
+          <div className="die-cube" style={{ '--show': SHOW[v] } as CSSProperties}>
+            <div className="die-core" /><div className="die-core y" /><div className="die-core x" />
+            {FACES.map((f) => (
+              <div key={f} className={`die-face f${f}`}>
+                {Array.from({ length: 9 }, (_, k) => <span key={k} className={PIPS[f].includes(k) ? 'pip' : ''} />)}
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -353,8 +365,8 @@ function Players({ state, presence, me, isAdmin, advancedBots, canGive, onGive, 
                 <div key={row[0]} className="chip-row">
                   {row.map((i) => {
                     const sp = BOARD[i];
-                    const bg = sp.kind === 'street' ? GROUP_COLORS[sp.group] : sp.kind === 'railroad' ? '#333' : '#8a8a8a';
-                    return <span key={i} className={`chip ${state.properties[i].mortgaged ? 'mortgaged' : ''}`} style={{ background: bg }} title={sp.name} />;
+                    const bg = sp.kind === 'street' ? GROUP_COLORS[sp.group] : undefined;
+                    return <span key={i} className={`chip ${sp.kind} ${state.properties[i].mortgaged ? 'mortgaged' : ''}`} style={{ background: bg }} title={sp.name} />;
                   })}
                 </div>
               ))}
@@ -398,7 +410,7 @@ function ManageRow({ state, me, index, act, onSpace }: { state: GameState; me: P
   return (
     <li>
       <button className="link prop-name" onClick={() => onSpace?.(index)}>
-        <span className="chip" style={{ background: sp.kind === 'street' ? GROUP_COLORS[sp.group] : '#555' }} />
+        <span className={`chip ${sp.kind}`} style={{ background: sp.kind === 'street' ? GROUP_COLORS[sp.group] : undefined }} />
         {sp.name}
       </button>
       <span className="muted small">
